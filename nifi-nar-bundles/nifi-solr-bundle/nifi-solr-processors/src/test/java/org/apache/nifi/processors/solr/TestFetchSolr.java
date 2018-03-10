@@ -53,18 +53,16 @@ import static org.junit.Assert.assertThat;
 public class TestFetchSolr {
     static final String DEFAULT_SOLR_CORE = "testCollection";
 
-    private static final SimpleDateFormat df = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US);
+    private static final SimpleDateFormat DATE_FORMAT = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US);
     static {
-        df.setTimeZone(TimeZone.getTimeZone("GMT"));
+        DATE_FORMAT.setTimeZone(TimeZone.getTimeZone("GMT"));
     }
 
     private SolrClient solrClient;
 
     @Before
     public void setup() {
-
         try {
-
             // create an EmbeddedSolrServer for the processor to use
             String relPath = getClass().getProtectionDomain().getCodeSource()
                     .getLocation().getFile() + "../../target";
@@ -76,7 +74,7 @@ public class TestFetchSolr {
                 SolrInputDocument doc = new SolrInputDocument();
                 doc.addField("id", "doc" + i);
                 Date date = new Date();
-                doc.addField("created", df.format(date));
+                doc.addField("created", DATE_FORMAT.format(date));
                 doc.addField("string_single", "single" + i + ".1");
                 doc.addField("string_multi", "multi" + i + ".1");
                 doc.addField("string_multi", "multi" + i + ".2");
@@ -87,8 +85,6 @@ public class TestFetchSolr {
                 doc.addField("double_single", 0.5 + i);
 
                 solrClient.add(doc);
-                System.out.println(doc.getField("created").getValue());
-
             }
             solrClient.commit();
         } catch (Exception e) {
@@ -110,12 +106,12 @@ public class TestFetchSolr {
         final TestableProcessor proc = new TestableProcessor(solrClient);
 
         TestRunner runner = TestRunners.newTestRunner(proc);
-        runner.setProperty(SolrUtils.SOLR_TYPE, SolrUtils.SOLR_TYPE_CLOUD.getValue());
+        runner.setProperty(SolrUtils.SOLR_TYPE, SolrUtils.SOLR_TYPE_STANDARD.getValue());
         runner.setProperty(SolrUtils.SOLR_LOCATION, "http://localhost:8443/solr");
         runner.setProperty(SolrUtils.COLLECTION, "testCollection");
         runner.setProperty(FetchSolr.SOLR_QUERY_STRING, "q=*:*" +
                 "&facet=true&facet.interval=integer_single&facet.interval.set=[4,7]&facet.interval.set=[5,7]" +
-                "&facet.field=integer_multi&facet.query=integer_multi:2&stats=true&stats.field=integer_multi" +
+                "&facet.field=integer_multi&facet.query=integer_multi:2" +
                 "&facet.range=created&facet.range.start=NOW/MINUTE&facet.range.end=NOW/MINUTE%2B1MINUTE&facet.range.gap=%2B20SECOND" +
                 "&facet.query=*:*&facet.query=integer_multi:2&facet.query=integer_multi:3"
         );
@@ -157,10 +153,11 @@ public class TestFetchSolr {
         while (reader.hasNext()) {
             reader.beginObject();
             while (reader.hasNext()) {
-                if (reader.nextName().equals("count"))
+                if (reader.nextName().equals("count")) {
                     checkSum += reader.nextInt();
-                else
+                } else {
                     reader.skipValue();
+                }
             }
             reader.endObject();
         }
@@ -180,6 +177,7 @@ public class TestFetchSolr {
         runner.enqueue(new ByteArrayInputStream("test".getBytes()));
         runner.run();
 
+        runner.assertTransferCount(FetchSolr.RESULTS, 1);
         runner.assertTransferCount(FetchSolr.FACETS, 1);
         runner.assertTransferCount(FetchSolr.STATS, 1);
 
@@ -218,7 +216,7 @@ public class TestFetchSolr {
         final TestableProcessor proc = new TestableProcessor(solrClient);
 
         TestRunner runner = TestRunners.newTestRunner(proc);
-        runner.setProperty(SolrUtils.SOLR_TYPE, SolrUtils.SOLR_TYPE_CLOUD.getValue());
+        runner.setProperty(SolrUtils.SOLR_TYPE, SolrUtils.SOLR_TYPE_STANDARD.getValue());
         runner.setProperty(SolrUtils.SOLR_LOCATION, "http://localhost:8443/solr");
         runner.setProperty(SolrUtils.COLLECTION, "testCollection");
         runner.setProperty(FetchSolr.SOLR_QUERY_STRING, "q=*:*&stats=true&stats.field=integer_single");
@@ -250,34 +248,90 @@ public class TestFetchSolr {
     }
 
     @Test
-    public void testFailure() {
+    public void testRelationshipRoutings() {
         final TestableProcessor proc = new TestableProcessor(solrClient);
 
         TestRunner runner = TestRunners.newTestRunner(proc);
-        runner.setProperty(SolrUtils.SOLR_TYPE, SolrUtils.SOLR_TYPE_CLOUD.getValue());
+        runner.setProperty(SolrUtils.SOLR_TYPE, SolrUtils.SOLR_TYPE_STANDARD.getValue());
         runner.setProperty(SolrUtils.SOLR_LOCATION, "http://localhost:8443/solr");
         runner.setProperty(SolrUtils.COLLECTION, "testCollection");
-        runner.setProperty(FetchSolr.REQUEST_HANDLER, "/sel");
+        runner.setProperty(FetchSolr.SOLR_QUERY_STRING, "q=*:*&facet=true&stats=true");
 
+        // Set request handler for request failure
+        runner.setProperty(FetchSolr.REQUEST_HANDLER, "/nonexistentrequesthandler");
+
+        // Processor has no input connection and fails
         runner.setNonLoopConnection(false);
-        runner.run();
-
-        runner.assertTransferCount(FetchSolr.FAILURE, 1);
-        runner.assertTransferCount(FetchSolr.ORIGINAL, 0);
+        runner.run(1, false);
+        runner.assertAllFlowFilesTransferred(FetchSolr.FAILURE, 1);
 
         MockFlowFile flowFile = runner.getFlowFilesForRelationship(FetchSolr.FAILURE).get(0);
         flowFile.assertAttributeExists(FetchSolr.EXCEPTION);
         flowFile.assertAttributeExists(FetchSolr.EXCEPTION_MESSAGE);
+        runner.clearTransferState();
+
+        // Processor has an input connection and fails
+        runner.setNonLoopConnection(true);
+        runner.enqueue("");
+        runner.run(1, false);
+        runner.assertAllFlowFilesTransferred(FetchSolr.FAILURE, 1);
+
+        flowFile = runner.getFlowFilesForRelationship(FetchSolr.FAILURE).get(0);
+        flowFile.assertAttributeExists(FetchSolr.EXCEPTION);
+        flowFile.assertAttributeExists(FetchSolr.EXCEPTION_MESSAGE);
+        runner.clearTransferState();
+
+        // Set request handler for successful request
+        runner.setProperty(FetchSolr.REQUEST_HANDLER, "/select");
+
+        // Processor has no input connection and succeeds
+        runner.setNonLoopConnection(false);
+        runner.run(1, false);
+        runner.assertTransferCount(FetchSolr.RESULTS, 1);
+        runner.assertTransferCount(FetchSolr.FACETS, 1);
+        runner.assertTransferCount(FetchSolr.STATS, 1);
+
+        flowFile = runner.getFlowFilesForRelationship(FetchSolr.RESULTS).get(0);
+        flowFile.assertAttributeExists(FetchSolr.ATTRIBUTE_SOLR_CONNECT);
+        flowFile.assertAttributeExists(FetchSolr.ATTRIBUTE_SOLR_STATUS);
+        flowFile.assertAttributeExists(FetchSolr.ATTRIBUTE_CURSOR_MARK);
+        flowFile.assertAttributeExists(FetchSolr.ATTRIBUTE_QUERY_TIME);
+        runner.clearTransferState();
+
+        // Processor has an input connection and succeeds
+        runner.setNonLoopConnection(true);
+        runner.enqueue("");
+        runner.run(1, true);
+        runner.assertTransferCount(FetchSolr.RESULTS, 1);
+        runner.assertTransferCount(FetchSolr.FACETS, 1);
+        runner.assertTransferCount(FetchSolr.STATS, 1);
+        runner.assertTransferCount(FetchSolr.ORIGINAL, 1);
+        runner.assertAllFlowFilesContainAttribute(FetchSolr.ATTRIBUTE_SOLR_CONNECT);
+
+        flowFile = runner.getFlowFilesForRelationship(FetchSolr.RESULTS).get(0);
+        flowFile.assertAttributeExists(FetchSolr.ATTRIBUTE_SOLR_CONNECT);
+        flowFile.assertAttributeExists(FetchSolr.ATTRIBUTE_SOLR_STATUS);
+        flowFile.assertAttributeExists(FetchSolr.ATTRIBUTE_CURSOR_MARK);
+        flowFile.assertAttributeExists(FetchSolr.ATTRIBUTE_QUERY_TIME);
+        flowFile = runner.getFlowFilesForRelationship(FetchSolr.FACETS).get(0);
+        flowFile.assertAttributeExists(FetchSolr.ATTRIBUTE_SOLR_CONNECT);
+        flowFile.assertAttributeExists(FetchSolr.ATTRIBUTE_SOLR_STATUS);
+        flowFile.assertAttributeExists(FetchSolr.ATTRIBUTE_CURSOR_MARK);
+        flowFile.assertAttributeExists(FetchSolr.ATTRIBUTE_QUERY_TIME);
+        flowFile = runner.getFlowFilesForRelationship(FetchSolr.STATS).get(0);
+        flowFile.assertAttributeExists(FetchSolr.ATTRIBUTE_SOLR_CONNECT);
+        flowFile.assertAttributeExists(FetchSolr.ATTRIBUTE_SOLR_STATUS);
+        flowFile.assertAttributeExists(FetchSolr.ATTRIBUTE_CURSOR_MARK);
+        flowFile.assertAttributeExists(FetchSolr.ATTRIBUTE_QUERY_TIME);
+        runner.clearTransferState();
     }
 
     @Test
     public void testExpressionLanguage() {
         final TestableProcessor proc = new TestableProcessor(solrClient);
 
-        ByteArrayInputStream is = new ByteArrayInputStream(new byte[0]);
-
         TestRunner runner = TestRunners.newTestRunner(proc);
-        runner.setProperty(SolrUtils.SOLR_TYPE, SolrUtils.SOLR_TYPE_CLOUD.getValue());
+        runner.setProperty(SolrUtils.SOLR_TYPE, SolrUtils.SOLR_TYPE_STANDARD.getValue());
         runner.setProperty(SolrUtils.SOLR_LOCATION, "http://localhost:8443/solr");
         runner.setProperty(SolrUtils.COLLECTION, "testCollection");
         runner.setProperty(FetchSolr.SOLR_QUERY_STRING, "${query}");
@@ -298,19 +352,19 @@ public class TestFetchSolr {
 
         TestRunner runner = TestRunners.newTestRunner(proc);
         runner.setProperty(SolrUtils.SOLR_TYPE, SolrUtils.SOLR_TYPE_CLOUD.getValue());
-        runner.setProperty(SolrUtils.SOLR_LOCATION, "http://localhost:8443/solr");
+        runner.setProperty(SolrUtils.SOLR_LOCATION, "http://localhost:8443/solr/testCollection");
         runner.setProperty(SolrUtils.COLLECTION, "testCollection");
         runner.setProperty(FetchSolr.SOLR_QUERY_STRING, "q=id:(doc0 OR doc1)&fl=id&sort=id desc");
 
         runner.setNonLoopConnection(false);
         runner.run();
         runner.assertTransferCount(FetchSolr.RESULTS, 1);
-        runner.assertTransferCount(FetchSolr.ORIGINAL, 1);
 
         MockFlowFile flowFile = runner.getFlowFilesForRelationship(FetchSolr.RESULTS).get(0);
         flowFile.assertAttributeExists(FetchSolr.ATTRIBUTE_CURSOR_MARK);
         flowFile.assertAttributeExists(FetchSolr.ATTRIBUTE_SOLR_STATUS);
         flowFile.assertAttributeExists(FetchSolr.ATTRIBUTE_QUERY_TIME);
+        flowFile.assertAttributeExists(FetchSolr.ATTRIBUTE_SOLR_COLLECTION);
 
         String expectedXml = "<docs><doc boost=\"1.0\"><field name=\"id\">doc1</field></doc><doc boost=\"1.0\"><field name=\"id\">doc0</field></doc></docs>";
         assertThat(expectedXml, CompareMatcher.isIdenticalTo(new String(runner.getContentAsByteArray(runner.getFlowFilesForRelationship(FetchSolr.RESULTS).get(0)))));
@@ -321,7 +375,7 @@ public class TestFetchSolr {
         final TestableProcessor proc = new TestableProcessor(solrClient);
 
         TestRunner runner = TestRunners.newTestRunner(proc);
-        runner.setProperty(SolrUtils.SOLR_TYPE, SolrUtils.SOLR_TYPE_CLOUD.getValue());
+        runner.setProperty(SolrUtils.SOLR_TYPE, SolrUtils.SOLR_TYPE_STANDARD.getValue());
         runner.setProperty(FetchSolr.RETURN_TYPE, FetchSolr.MODE_REC.getValue());
         runner.setProperty(SolrUtils.SOLR_LOCATION, "http://localhost:8443/solr");
         runner.setProperty(SolrUtils.COLLECTION, "testCollection");
@@ -340,12 +394,9 @@ public class TestFetchSolr {
 
         runner.setNonLoopConnection(false);
 
-        runner.run(1,true, true);
+        runner.run(1);
         runner.assertQueueEmpty();
         runner.assertTransferCount(FetchSolr.RESULTS, 1);
-        runner.assertTransferCount(FetchSolr.ORIGINAL, 1);
-        for (MockFlowFile flowFile : runner.getFlowFilesForRelationship(FetchSolr.RESULTS))
-            System.out.println(new String(runner.getContentAsByteArray(flowFile)));
 
         JsonReader reader = new JsonReader(new InputStreamReader(new ByteArrayInputStream(
                 runner.getContentAsByteArray(runner.getFlowFilesForRelationship(FetchSolr.RESULTS).get(0)))));
@@ -354,10 +405,11 @@ public class TestFetchSolr {
         while (reader.hasNext()) {
             reader.beginObject();
             while (reader.hasNext()) {
-                if (reader.nextName().equals("integer_single"))
+                if (reader.nextName().equals("integer_single")) {
                     controlScore += reader.nextInt();
-                else
+                } else {
                     reader.skipValue();
+                }
             }
             reader.endObject();
         }

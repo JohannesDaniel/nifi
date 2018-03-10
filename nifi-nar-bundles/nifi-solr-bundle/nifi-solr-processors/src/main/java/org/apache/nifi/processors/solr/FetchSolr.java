@@ -36,7 +36,6 @@ import org.apache.nifi.processor.ProcessSession;
 import org.apache.nifi.processor.ProcessorInitializationContext;
 import org.apache.nifi.processor.Relationship;
 import org.apache.nifi.processor.exception.ProcessException;
-import org.apache.nifi.processor.io.OutputStreamCallback;
 import org.apache.nifi.processor.util.StandardValidators;
 import org.apache.nifi.schema.access.SchemaNotFoundException;
 import org.apache.nifi.serialization.RecordSetWriter;
@@ -57,7 +56,6 @@ import org.apache.solr.common.params.StatsParams;
 import org.apache.solr.servlet.SolrRequestParsers;
 
 import java.io.IOException;
-import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -71,6 +69,7 @@ import java.util.Set;
 import static org.apache.nifi.processors.solr.SolrUtils.SOLR_TYPE;
 import static org.apache.nifi.processors.solr.SolrUtils.COLLECTION;
 import static org.apache.nifi.processors.solr.SolrUtils.JAAS_CLIENT_APP_NAME;
+import static org.apache.nifi.processors.solr.SolrUtils.SOLR_TYPE_CLOUD;
 import static org.apache.nifi.processors.solr.SolrUtils.SSL_CONTEXT_SERVICE;
 import static org.apache.nifi.processors.solr.SolrUtils.SOLR_SOCKET_TIMEOUT;
 import static org.apache.nifi.processors.solr.SolrUtils.SOLR_CONNECTION_TIMEOUT;
@@ -87,6 +86,9 @@ import static org.apache.nifi.processors.solr.SolrUtils.RECORD_WRITER;
 @InputRequirement(InputRequirement.Requirement.INPUT_ALLOWED)
 @CapabilityDescription("Queries Solr and outputs the results as a FlowFile in the format of XML or using a Record Writer")
 @WritesAttributes({
+        @WritesAttribute(attribute = "solr.connect", description = "Solr connect string"),
+        @WritesAttribute(attribute = "solr.collection", description = "Solr collection"),
+        @WritesAttribute(attribute = "solr.query", description = "Query string sent to Solr"),
         @WritesAttribute(attribute = "solr.cursor.mark", description = "Cursor mark can be used for scrolling Solr"),
         @WritesAttribute(attribute = "solr.status.code", description = "Status code of Solr request. A status code of 0 indicates that the request was successfully processed"),
         @WritesAttribute(attribute = "solr.query.time", description = "The elapsed time to process the query (in ms)"),
@@ -99,6 +101,9 @@ public class FetchSolr extends SolrProcessor {
     public static final AllowableValue MODE_XML = new AllowableValue("XML");
     public static final AllowableValue MODE_REC = new AllowableValue("Records");
     public static final String MIME_TYPE_JSON = "application/json";
+    public static final String ATTRIBUTE_SOLR_CONNECT = "solr.connect";
+    public static final String ATTRIBUTE_SOLR_COLLECTION = "solr.collection";
+    public static final String ATTRIBUTE_SOLR_QUERY = "solr.query";
     public static final String ATTRIBUTE_CURSOR_MARK = "solr.cursor.mark";
     public static final String ATTRIBUTE_SOLR_STATUS = "solr.status.code";
     public static final String ATTRIBUTE_QUERY_TIME = "solr.query.time";
@@ -203,114 +208,140 @@ public class FetchSolr extends SolrProcessor {
     public void onTrigger(final ProcessContext context, final ProcessSession session) throws ProcessException {
         final ComponentLog logger = getLogger();
 
-        FlowFile flowFileOriginal = session.get();
+        FlowFile flowFileRequest = session.get();
+        boolean keepOriginal;
 
-        if (flowFileOriginal == null) {
-            if (context.hasNonLoopConnection())
+        if (flowFileRequest == null) {
+            if (context.hasNonLoopConnection()) {
                 return;
-            flowFileOriginal = session.create();
+            }
+            flowFileRequest = session.create();
+            keepOriginal = false;
+        } else {
+            keepOriginal = true;
         }
 
-        final Map<String,String[]> solrParams = parseSolrParams(context, flowFileOriginal);
+        final String queryString = context.getProperty(SOLR_QUERY_STRING).evaluateAttributeExpressions(flowFileRequest).getValue();
+
+        final Map<String,String[]> solrParams = SolrRequestParsers.parseQueryString(queryString).getMap();
         final Set<String> searchComponents = extractSearchComponents(solrParams);
         final SolrQuery solrQuery = new SolrQuery();
         solrQuery.add(new MultiMapSolrParams(solrParams));
 
-        solrQuery.setRequestHandler(context.getProperty(REQUEST_HANDLER).getValue());
+        final String requestHandler = context.getProperty(REQUEST_HANDLER).getValue();
+        solrQuery.setRequestHandler(requestHandler);
 
         final QueryRequest req = new QueryRequest(solrQuery);
 
         if (isBasicAuthEnabled()) {
             req.setBasicAuthCredentials(getUsername(), getPassword());
         }
+
+        flowFileRequest = session.putAttribute(flowFileRequest, ATTRIBUTE_SOLR_CONNECT, getSolrLocation());
+        if (SOLR_TYPE_CLOUD.equals(context.getProperty(SOLR_TYPE).getValue())) {
+            flowFileRequest = session.putAttribute(flowFileRequest, ATTRIBUTE_SOLR_COLLECTION, context.getProperty(COLLECTION).evaluateAttributeExpressions().getValue());
+        }
+        flowFileRequest = session.putAttribute(flowFileRequest, ATTRIBUTE_SOLR_QUERY, solrQuery.toString());
+
+        FlowFile flowFileResponse;
+        if (!keepOriginal) {
+            flowFileResponse = flowFileRequest;
+            flowFileRequest = null;
+        } else {
+            flowFileResponse = session.create(flowFileRequest);
+        }
+
         try {
             final QueryResponse response = req.process(getSolrClient());
-            Map<String,String> attributes = new HashMap<>();
-            attributes.put(ATTRIBUTE_CURSOR_MARK, response.getNextCursorMark());
-            attributes.put(ATTRIBUTE_SOLR_STATUS, String.valueOf(response.getStatus()));
-            attributes.put(ATTRIBUTE_QUERY_TIME, String.valueOf(response.getQTime()));
+
+            Map<String,String> responseAttributes = new HashMap<>();
+            responseAttributes.put(ATTRIBUTE_CURSOR_MARK, response.getNextCursorMark());
+            responseAttributes.put(ATTRIBUTE_SOLR_STATUS, String.valueOf(response.getStatus()));
+            responseAttributes.put(ATTRIBUTE_QUERY_TIME, String.valueOf(response.getQTime()));
+            flowFileResponse = session.putAllAttributes(flowFileResponse, responseAttributes);
 
             if (response.getResults().size() > 0) {
-                FlowFile flowFileResponse = session.create(flowFileOriginal);
                 if (context.getProperty(RETURN_TYPE).getValue().equals(MODE_XML.getValue())){
                     flowFileResponse = session.write(flowFileResponse, SolrUtils.getOutputStreamCallbackToTransformSolrResponseToXml(response));
                     flowFileResponse = session.putAttribute(flowFileResponse, CoreAttributes.MIME_TYPE.key(), "application/xml");
                 } else {
                     final RecordSetWriterFactory writerFactory = context.getProperty(RECORD_WRITER).asControllerService(RecordSetWriterFactory.class);
-                    final RecordSchema schema = writerFactory.getSchema(flowFileOriginal.getAttributes(), null);
+                    final RecordSchema schema = writerFactory.getSchema(flowFileResponse.getAttributes(), null);
                     final RecordSet recordSet = SolrUtils.solrDocumentsToRecordSet(response.getResults(), schema);
                     final StringBuffer mimeType = new StringBuffer();
-                    flowFileResponse = session.write(flowFileResponse, new OutputStreamCallback() {
-                        @Override
-                        public void process(final OutputStream out) throws IOException {
-                            try (final RecordSetWriter writer = writerFactory.createWriter(getLogger(), schema, out)) {
-                                writer.write(recordSet);
-                                writer.flush();
-                                mimeType.append(writer.getMimeType());
-                            } catch (SchemaNotFoundException e) {
-                                throw new ProcessException("Could not parse Solr response", e);
-                            }
+                    flowFileResponse = session.write(flowFileResponse, out -> {
+                        try (final RecordSetWriter writer = writerFactory.createWriter(getLogger(), schema, out)) {
+                            writer.write(recordSet);
+                            writer.flush();
+                            mimeType.append(writer.getMimeType());
+                        } catch (SchemaNotFoundException e) {
+                            throw new ProcessException("Could not parse Solr response", e);
                         }
                     });
                     flowFileResponse = session.putAttribute(flowFileResponse, CoreAttributes.MIME_TYPE.key(), mimeType.toString());
                 }
-                flowFileResponse = session.putAllAttributes(flowFileResponse, attributes);
-                session.transfer(flowFileResponse, RESULTS);
-            }
 
-            if (searchComponents.contains(FacetParams.FACET)) {
-                FlowFile flowFileFacets = session.create(flowFileOriginal);
-                flowFileFacets = session.write(flowFileFacets, out -> {
-                    try (
-                            final OutputStreamWriter osw = new OutputStreamWriter(out);
-                            final JsonWriter writer = new JsonWriter(osw)
-                    ) {
-                        addFacetsFromSolrResponseToJsonWriter(response, writer);
-                    }
-                });
-                flowFileFacets = session.putAttribute(flowFileFacets, CoreAttributes.MIME_TYPE.key(), MIME_TYPE_JSON);
-                flowFileFacets = session.putAllAttributes(flowFileFacets, attributes);
-                session.transfer(flowFileFacets, FACETS);
-            }
+                if (searchComponents.contains(FacetParams.FACET)) {
+                    FlowFile flowFileFacets = session.create(flowFileResponse);
+                    flowFileFacets = session.write(flowFileFacets, out -> {
+                        try (
+                                final OutputStreamWriter osw = new OutputStreamWriter(out);
+                                final JsonWriter writer = new JsonWriter(osw)
+                        ) {
+                            addFacetsFromSolrResponseToJsonWriter(response, writer);
+                        }
+                    });
+                    flowFileFacets = session.putAttribute(flowFileFacets, CoreAttributes.MIME_TYPE.key(), MIME_TYPE_JSON);
+                    session.transfer(flowFileFacets, FACETS);
+                }
 
-            if (searchComponents.contains(StatsParams.STATS)) {
-                FlowFile flowFileStats = session.create(flowFileOriginal);
-                flowFileStats = session.write(flowFileStats, out -> {
-                    try (
-                            final OutputStreamWriter osw = new OutputStreamWriter(out);
-                            final JsonWriter writer = new JsonWriter(osw)
-                    ) {
-                        addStatsFromSolrResponseToJsonWriter(response, writer);
-                    }
-                });
-                flowFileStats = session.putAttribute(flowFileStats, CoreAttributes.MIME_TYPE.key(), MIME_TYPE_JSON);
-                flowFileStats = session.putAllAttributes(flowFileStats, attributes);
-                session.transfer(flowFileStats, STATS);
+                if (searchComponents.contains(StatsParams.STATS)) {
+                    FlowFile flowFileStats = session.create(flowFileResponse);
+                    flowFileStats = session.write(flowFileStats, out -> {
+                        try (
+                                final OutputStreamWriter osw = new OutputStreamWriter(out);
+                                final JsonWriter writer = new JsonWriter(osw)
+                        ) {
+                            addStatsFromSolrResponseToJsonWriter(response, writer);
+                        }
+                    });
+                    flowFileStats = session.putAttribute(flowFileStats, CoreAttributes.MIME_TYPE.key(), MIME_TYPE_JSON);
+                    session.transfer(flowFileStats, STATS);
+                }
             }
 
         } catch (Exception e) {
-            flowFileOriginal = session.penalize(flowFileOriginal);
-            flowFileOriginal = session.putAttribute(flowFileOriginal, EXCEPTION, e.getClass().getName());
-            flowFileOriginal = session.putAttribute(flowFileOriginal, EXCEPTION_MESSAGE, e.getMessage());
-            session.transfer(flowFileOriginal, FAILURE);
+            flowFileResponse = session.penalize(flowFileResponse);
+            flowFileResponse = session.putAttribute(flowFileResponse, EXCEPTION, e.getClass().getName());
+            flowFileResponse = session.putAttribute(flowFileResponse, EXCEPTION_MESSAGE, e.getMessage());
+            session.transfer(flowFileResponse, FAILURE);
             logger.error("Failed to execute query {} due to {}. FlowFile will be routed to relationship failure", new Object[]{solrQuery.toString(), e}, e);
+            if (flowFileRequest != null) {
+                flowFileRequest = session.penalize(flowFileRequest);
+            }
         }
 
-        if (!flowFileOriginal.isPenalized())
-            session.transfer(flowFileOriginal, ORIGINAL);
-    }
+        if (!flowFileResponse.isPenalized()) {
+            session.transfer(flowFileResponse, RESULTS);
+        }
 
-    private Map<String,String[]> parseSolrParams(final ProcessContext context, final FlowFile flowFile) {
-        final MultiMapSolrParams newSolrParams = SolrRequestParsers.parseQueryString(context.getProperty(SOLR_QUERY_STRING).evaluateAttributeExpressions(flowFile).getValue());
-        return Collections.unmodifiableMap(newSolrParams.getMap());
+        if (flowFileRequest != null) {
+            if (!flowFileRequest.isPenalized()) {
+                session.transfer(flowFileRequest, ORIGINAL);
+            } else {
+                session.remove(flowFileRequest);
+            }
+        }
     }
 
     private Set<String> extractSearchComponents(Map<String,String[]> solrParams) {
         final Set<String> searchComponentsTemp = new HashSet<>();
         for (final String searchComponent : SUPPORTED_SEARCH_COMPONENTS)
-            if (solrParams.keySet().contains(searchComponent))
-                if (SEARCH_COMPONENTS_ON.contains(solrParams.get(searchComponent)[0]))
+            if (solrParams.keySet().contains(searchComponent)) {
+                if (SEARCH_COMPONENTS_ON.contains(solrParams.get(searchComponent)[0])) {
                     searchComponentsTemp.add(searchComponent);
+                }
+            }
         return Collections.unmodifiableSet(searchComponentsTemp);
     }
 
