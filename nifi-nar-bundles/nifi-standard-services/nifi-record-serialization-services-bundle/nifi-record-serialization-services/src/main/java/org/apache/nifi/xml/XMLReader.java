@@ -56,10 +56,12 @@ public class XMLReader extends SchemaRegistryService implements RecordReaderFact
             .required(true)
             .build();
 
-//    private volatile List<String> xmlRecordPathElements = null;
-    private volatile Tuple<String, String> xmlRecordPathElements = null;
+    private volatile String dateFormat;
+    private volatile String timeFormat;
+    private volatile String timestampFormat;
 
-    // ggf. XMLPathValidator (wäre cool)
+
+    // ggf. XMLPathValidator, also custom validator (wäre cool)
     @Override
     public void onPropertyModified(PropertyDescriptor descriptor, String oldValue, String newValue) {
         // Record Path
@@ -70,19 +72,14 @@ public class XMLReader extends SchemaRegistryService implements RecordReaderFact
 
     @Override
     protected Collection<ValidationResult> customValidate(final ValidationContext validationContext) {
+
+        // bei einem array sollte der pfad /root/record heißen, bei einem single processor /root
         final Collection<ValidationResult> problems = new ArrayList<>();
 
 
         if (validationContext.getProperty(VALIDATE_XML_PATH_TO_RECORD).isSet()) {
             final List<String> elementsList = Arrays.asList(
                     validationContext.getProperty(VALIDATE_XML_PATH_TO_RECORD).getValue().trim().split("/"));
-
-            switch (elementsList.size()) {
-                case 1: xmlRecordPathElements = new Tuple<>(elementsList.get(0), null); break;
-                case 2: xmlRecordPathElements = new Tuple<>(elementsList.get(0), elementsList.get(1)); break;
-                // ValidationResult adden
-                default: problems.add(null);
-            }
         }
 
         return problems;
@@ -90,8 +87,12 @@ public class XMLReader extends SchemaRegistryService implements RecordReaderFact
 
 
 
-        @OnEnabled
+    @OnEnabled
     public void parseXmlPath(final ConfigurationContext context) {
+        this.dateFormat = context.getProperty(DateTimeUtils.DATE_FORMAT).getValue();
+        this.timeFormat = context.getProperty(DateTimeUtils.TIME_FORMAT).getValue();
+        this.timestampFormat = context.getProperty(DateTimeUtils.TIMESTAMP_FORMAT).getValue();
+
 
     }
 
@@ -122,7 +123,15 @@ public class XMLReader extends SchemaRegistryService implements RecordReaderFact
         }
         */
 
+        final boolean isArray = getConfigurationContext().getProperty(EXPECTED_DATA).getValue().equals(EXPECT_ARRAY_OF_RECORDS);
+
+        if (getConfigurationContext().getProperty(VALIDATE_XML_PATH_TO_RECORD).isSet()) {
+
+        }
+        final String xmlPathToRecord = getConfigurationContext().getProperty(VALIDATE_XML_PATH_TO_RECORD).isSet() ?
+                getConfigurationContext().getProperty(VALIDATE_XML_PATH_TO_RECORD).getValue() : null;
+
         final RecordSchema schema = getSchema(variables, in, null);
-        return new XMLRecordReader(in, schema, xmlRecordPathElements);
+        return new XMLRecordReader(in, schema, isArray, xmlPathToRecord, dateFormat, timeFormat, timestampFormat);
     }
 }

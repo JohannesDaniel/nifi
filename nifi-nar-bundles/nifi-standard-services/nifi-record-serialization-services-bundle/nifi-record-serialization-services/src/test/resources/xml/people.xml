@@ -1,0 +1,22 @@
+<PEOPLE attr="attr1">
+    <PERSON ATTR_CD="VAL_CD1">
+        <NAME>Cleve Butler</NAME>
+        <AGE>42</AGE>
+        <COUNTRY>USA</COUNTRY>
+    </PERSON>
+    <PERSON ATTR_CD="VAL_CD1">
+        <NAME>Ainslie Fletcher</NAME>
+        <AGE>33</AGE>
+        <COUNTRY>UK</COUNTRY>
+    </PERSON>
+    <PERSON ATTR_CD="VAL_CD1">
+        <NAME>Amélie Bonfils</NAME>
+        <AGE>74</AGE>
+        <COUNTRY>FR</COUNTRY>
+    </PERSON>
+    <PERSON ATTR_CD="VAL_CD1">
+        <NAME>Elenora Scrivens</NAME>
+        <AGE>16</AGE>
+        <COUNTRY>USA</COUNTRY>
+    </PERSON>
+</PEOPLE>
