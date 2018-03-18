@@ -132,6 +132,8 @@ public class XMLReader extends SchemaRegistryService implements RecordReaderFact
                 getConfigurationContext().getProperty(VALIDATE_XML_PATH_TO_RECORD).getValue() : null;
 
         final RecordSchema schema = getSchema(variables, in, null);
+
+        // attributeprefix
         return new XMLRecordReader(in, schema, isArray, xmlPathToRecord, dateFormat, timeFormat, timestampFormat);
     }
 }

@@ -7,10 +7,9 @@ import org.apache.nifi.serialization.record.MapRecord;
 import org.apache.nifi.serialization.record.Record;
 import org.apache.nifi.serialization.record.RecordField;
 import org.apache.nifi.serialization.record.RecordSchema;
-import org.apache.nifi.serialization.record.SerializedForm;
+import org.apache.nifi.serialization.record.type.ArrayDataType;
 import org.apache.nifi.serialization.record.type.RecordDataType;
 import org.apache.nifi.serialization.record.util.DataTypeUtils;
-import org.apache.nifi.util.Tuple;
 
 import javax.xml.stream.XMLEventReader;
 import javax.xml.stream.XMLInputFactory;
@@ -23,6 +22,7 @@ import javax.xml.stream.events.XMLEvent;
 import java.io.IOException;
 import java.io.InputStream;
 import java.text.DateFormat;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
@@ -40,6 +40,7 @@ public class XMLRecordReader implements RecordReader {
     private List<String> fieldNames;
     private String rootName;
     private String recordName;
+    private String attributePrefix;
 
     private StartElement currentRecordStartTag;
 
@@ -58,6 +59,7 @@ public class XMLRecordReader implements RecordReader {
         this.schema = schema;
         this.fieldNames = schema.getFieldNames();
         this.recordName = recordName;
+        this.attributePrefix = attributePrefix;
 
         final DateFormat df = dateFormat == null ? null : DataTypeUtils.getDateFormat(dateFormat);
         final DateFormat tf = timeFormat == null ? null : DataTypeUtils.getDateFormat(timeFormat);
@@ -104,11 +106,16 @@ public class XMLRecordReader implements RecordReader {
             XMLEvent xmlEvent = xmlEventReader.nextEvent();
             if (xmlEvent.isStartElement()) {
                 StartElement startElement = xmlEvent.asStartElement();
-                if (startElement.getName().toString().equals(recordName)) {
+                if (recordName != null) {
+                    if (startElement.getName().toString().equals(recordName)) {
+                        currentRecordStartTag = startElement;
+                        return;
+                    } else {
+                        skipElement();
+                    }
+                } else {
                     currentRecordStartTag = startElement;
                     return;
-                } else {
-                    skipElement();
                 }
             }
         }
@@ -121,7 +128,7 @@ public class XMLRecordReader implements RecordReader {
             return null;
         }
         try {
-            Record record = parseRecord(currentRecordStartTag, this.schema);
+            Record record = parseRecord(currentRecordStartTag, this.schema, coerceTypes, dropUnknownFields);
             setNextRecordStartTag();
             return record;
         } catch (XMLStreamException e) {
@@ -129,7 +136,7 @@ public class XMLRecordReader implements RecordReader {
         }
     }
 
-    private Object parseField(StartElement startElement, String fieldName, DataType dataType) throws XMLStreamException {
+    private Object parseFieldForType(StartElement startElement, String fieldName, DataType dataType) throws XMLStreamException {
         switch (dataType.getFieldType()) {
             case BOOLEAN:
             case BYTE:
@@ -147,7 +154,8 @@ public class XMLRecordReader implements RecordReader {
                 return DataTypeUtils.convertType(value, dataType, LAZY_DATE_FORMAT, LAZY_TIME_FORMAT, LAZY_TIMESTAMP_FORMAT, fieldName);
             }
             case ARRAY: {
-
+                final DataType arrayDataType = ((ArrayDataType) dataType).getElementType();
+                return parseArray(startElement, fieldName, arrayDataType);
             }
             case RECORD: {
                 RecordSchema childSchema;
@@ -156,18 +164,59 @@ public class XMLRecordReader implements RecordReader {
                 } else {
                     return null;
                 }
-                parseRecord(startElement, childSchema);
-
+                return parseRecord(startElement, childSchema, true, true);
             }
             case MAP: {
-
+                // type not supported
+                return null;
             }
             case CHOICE: {
-
+                // Type cannot be determined a priori
+                return null;
             }
         }
         return null;
+    }
 
+    private Object parseAttributeForType(Attribute attribute, String fieldName, DataType dataType) {
+        switch (dataType.getFieldType()) {
+            case BOOLEAN:
+            case BYTE:
+            case CHAR:
+            case DOUBLE:
+            case FLOAT:
+            case INT:
+            case LONG:
+            case SHORT:
+            case STRING:
+            case DATE:
+            case TIME:
+            case TIMESTAMP: {
+                return DataTypeUtils.convertType(attribute.getValue(), dataType, LAZY_DATE_FORMAT, LAZY_TIME_FORMAT, LAZY_TIMESTAMP_FORMAT, fieldName);
+            }
+        }
+        return null;
+    }
+
+    private Object[] parseArray(StartElement startElement, String fieldName, DataType arrayDataType) throws XMLStreamException {
+        // repeating elements should be sufficient
+        List<Object> elements = new ArrayList<>();
+        while (xmlEventReader.hasNext()) {
+            XMLEvent xmlEvent = xmlEventReader.nextEvent();
+            if (xmlEvent.isStartElement()) {
+                StartElement startSubElement = xmlEvent.asStartElement();
+                Object element = parseFieldForType(startSubElement, fieldName, arrayDataType);
+                elements.add(element);
+            } else if (xmlEvent.isEndElement()){
+                EndElement endElement = xmlEvent.asEndElement();
+                //check not necessary
+                if (endElement.getName().equals(startElement.getName())) {
+                    break;
+                }
+            }
+        }
+
+        return elements.toArray();
     }
 
     private String extractSimpleValue(StartElement startElement) throws XMLStreamException {
@@ -180,15 +229,43 @@ public class XMLRecordReader implements RecordReader {
         return characters.toString();
     }
 
-    private Record parseRecord(StartElement startElement, RecordSchema schema) throws XMLStreamException {
+    private Record parseRecord(StartElement startElement, RecordSchema schema, boolean coerceTypes, boolean dropUnknown) throws XMLStreamException {
         Map<String, Object> recordValues = new HashMap<>();
 
         // parse attributes
+        // field content?
         Iterator iterator = startElement.getAttributes();
-        while (iterator.hasNext())
-        {
+        while (iterator.hasNext()) {
             Attribute attribute = (Attribute) iterator.next();
-            //System.out.println(att.getName() + " " + att.getValue());
+            String fieldName = attribute.getName().toString();
+
+            if (dropUnknown) {
+                Optional<RecordField> field = schema.getField(fieldName);
+                if (field.isPresent()){
+                    if (coerceTypes) {
+                        Object value;
+                        if ((value = parseAttributeForType(attribute, fieldName, field.get().getDataType())) != null) {
+                            recordValues.put(attributePrefix == null ? fieldName : attributePrefix + fieldName, value);
+                        }
+                    } else {
+                        recordValues.put(attributePrefix == null ? fieldName : attributePrefix + fieldName, attribute.getValue());
+                    }
+                }
+            } else {
+                if (coerceTypes) {
+                    Optional<RecordField> field = schema.getField(fieldName);
+                    if (field.isPresent()){
+                        Object value;
+                        if ((value = parseAttributeForType(attribute, fieldName, field.get().getDataType())) != null) {
+                            recordValues.put(attributePrefix == null ? fieldName : attributePrefix + fieldName, value);
+                        }
+                    } else {
+                        recordValues.put(attributePrefix == null ? fieldName : attributePrefix + fieldName, attribute.getValue());
+                    }
+                } else {
+                    recordValues.put(attributePrefix == null ? fieldName : attributePrefix + fieldName, attribute.getValue());
+                }
+            }
         }
 
         // parse fields
@@ -200,16 +277,24 @@ public class XMLRecordReader implements RecordReader {
                 String fieldName = startSubElement.getName().toString();
                 Optional<RecordField> field = schema.getField(fieldName);
                 if (field.isPresent()){
-                    Object value = parseField(startSubElement, fieldName, field.get().getDataType());
-                    recordValues.put(fieldName, value);
+                    if (coerceTypes) {
+                        Object value = parseFieldForType(startSubElement, fieldName, field.get().getDataType());
+                        if (value != null) {
+                            recordValues.put(fieldName, value);
+                        }
+                    } else {
+                        // parse unknown type
+                    }
+
                 } else {
-                    skipElement();
+                    if (dropUnknown) {
+                        skipElement();
+                    } else {
+                        // parse unknown type
+                    }
                 }
             } else if (xmlEvent.isEndElement()) {
-                EndElement endElement = xmlEvent.asEndElement();
-                if (endElement.getName().equals(startElement.getName())) {
-                    break;
-                }
+                break;
             }
         }
         return new MapRecord(schema, recordValues);
@@ -226,6 +311,10 @@ public class XMLRecordReader implements RecordReader {
                 return;
             }
         }
+    }
+
+    private void parseFieldForUnknownType() {
+
     }
 
 
