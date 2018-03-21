@@ -2,6 +2,7 @@ package org.apache.nifi.xml;
 
 import org.apache.nifi.serialization.MalformedRecordException;
 import org.apache.nifi.serialization.RecordReader;
+import org.apache.nifi.serialization.SimpleRecordSchema;
 import org.apache.nifi.serialization.record.DataType;
 import org.apache.nifi.serialization.record.MapRecord;
 import org.apache.nifi.serialization.record.Record;
@@ -23,12 +24,15 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.text.DateFormat;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Supplier;
+
+import static org.apache.nifi.serialization.record.RecordFieldType.ARRAY;
 
 public class XMLRecordReader implements RecordReader {
 
@@ -53,7 +57,7 @@ public class XMLRecordReader implements RecordReader {
 
     // final zu allem wo es geht
 
-    public XMLRecordReader(InputStream in, RecordSchema schema, boolean isArray, String recordName,
+    public XMLRecordReader(InputStream in, RecordSchema schema, boolean isArray, String recordName, String attributePrefix,
                            final String dateFormat, final String timeFormat, final String timestampFormat) throws MalformedRecordException {
         this.in =  in;
         this.schema = schema;
@@ -136,7 +140,7 @@ public class XMLRecordReader implements RecordReader {
         }
     }
 
-    private Object parseFieldForType(StartElement startElement, String fieldName, DataType dataType) throws XMLStreamException {
+    private Object parseFieldForType(StartElement startElement, String fieldName, DataType dataType, Map<String, Object> recordValues) throws XMLStreamException {
         switch (dataType.getFieldType()) {
             case BOOLEAN:
             case BYTE:
@@ -150,12 +154,26 @@ public class XMLRecordReader implements RecordReader {
             case DATE:
             case TIME:
             case TIMESTAMP: {
-                final String value = extractSimpleValue(startElement);
-                return DataTypeUtils.convertType(value, dataType, LAZY_DATE_FORMAT, LAZY_TIME_FORMAT, LAZY_TIMESTAMP_FORMAT, fieldName);
+                Characters characters = xmlEventReader.nextEvent().asCharacters();
+                xmlEventReader.nextEvent();
+                return DataTypeUtils.convertType(characters.toString(), dataType, LAZY_DATE_FORMAT, LAZY_TIME_FORMAT, LAZY_TIMESTAMP_FORMAT, fieldName);
             }
             case ARRAY: {
                 final DataType arrayDataType = ((ArrayDataType) dataType).getElementType();
-                return parseArray(startElement, fieldName, arrayDataType);
+
+                // works only for first level, has to be done in parseRecord ???
+                final Object newValue = parseFieldForType(startElement, fieldName, arrayDataType, recordValues);
+                final Object oldValues = recordValues.get(fieldName);
+
+                if (oldValues != null) {
+                    if (oldValues instanceof List) {
+                        ((List) oldValues).add(newValue);
+                    } else {
+                        return new ArrayList<Object>(){{ add(oldValues); add(newValue); }};
+                    }
+                } else {
+                    return new ArrayList<Object>(){{ add(newValue); }};
+                }
             }
             case RECORD: {
                 RecordSchema childSchema;
@@ -178,6 +196,201 @@ public class XMLRecordReader implements RecordReader {
         return null;
     }
 
+    private Object parseUnknownField(StartElement startElement) throws XMLStreamException {
+        // record for attributes and tags
+        // array for repetitive tags
+        // simple for characters
+
+        final String fieldName = startElement.getName().toString();
+
+        // attributes
+        Map<String, Object> recordValues = new HashMap<>();
+        Iterator iterator = startElement.getAttributes();
+
+        // attributePrefix == null ? attributeName : attributePrefix + attributeName
+        while (iterator.hasNext()) {
+            Attribute attribute = (Attribute) iterator.next();
+            final String attributeName = attribute.getName().toString();
+            recordValues.put(attributePrefix == null ? attributeName : attributePrefix + attributeName, attribute.getValue());
+        }
+        boolean hasAttributes = recordValues.size() > 0;
+
+        while (xmlEventReader.hasNext()) {
+            XMLEvent xmlEvent = xmlEventReader.nextEvent();
+            if (xmlEvent.isCharacters()) {
+                Characters characters = xmlEvent.asCharacters();
+                if (!characters.isWhiteSpace()) {
+                    xmlEventReader.nextEvent();
+                    if (hasAttributes) {
+                        recordValues.put(fieldName, characters.toString());
+                        xmlEventReader.nextEvent();
+                        return new MapRecord(new SimpleRecordSchema(Collections.emptyList()), recordValues);
+                    } else {
+                        return characters.toString();
+                    }
+                }
+            } else if (xmlEvent.isStartElement()){
+                final StartElement subStartElement = xmlEvent.asStartElement();
+                final String subFieldName = subStartElement.getName().toString();
+
+                putUnknownTypeInMap(recordValues, subFieldName, parseUnknownField(subStartElement));
+
+                /*
+                final Object fieldValue = parseUnknownField(subStartElement);
+                final Object oldValues = recordValues.get(subFieldName);
+
+                if (oldValues != null) {
+                    if (oldValues instanceof List) {
+                        ((List) oldValues).add(fieldValue);
+                    } else {
+                        recordValues.put(subFieldName, new ArrayList<Object>(){{ add(fieldValue); }});
+                    }
+                } else {
+                    recordValues.put(subFieldName, fieldValue);
+                }
+                */
+            } else if (xmlEvent.isEndElement()) {
+                break;
+            }
+
+        }
+
+        for (Map.Entry<String,Object> entry : recordValues.entrySet()) {
+            if (entry.getValue() instanceof List) {
+                recordValues.put(entry.getKey(), ((List) entry.getValue()).toArray());
+            }
+        }
+
+        return new MapRecord(new SimpleRecordSchema(Collections.emptyList()), recordValues);
+    }
+
+    private Record parseRecord(StartElement startElement, RecordSchema schema, boolean coerceTypes, boolean dropUnknown) throws XMLStreamException {
+        Map<String, Object> recordValues = new HashMap<>();
+
+        // parse attributes
+        Iterator iterator = startElement.getAttributes();
+        while (iterator.hasNext()) {
+            Attribute attribute = (Attribute) iterator.next();
+            String attributeName = attribute.getName().toString();
+            /*
+                Notice that if attributePrefix is set the reader will create a field that has no corresponding schema entry
+             */
+            String targetFieldName = attributePrefix == null ? attributeName : attributePrefix + attributeName;
+
+            if (dropUnknown) {
+                Optional<RecordField> field = schema.getField(attributeName);
+                if (field.isPresent()){
+
+                    // dropUnknown == true && coerceTypes == true
+                    if (coerceTypes) {
+                        Object value;
+                        DataType dataType = field.get().getDataType();
+                        if ((value = parseAttributeForType(attribute, attributeName, dataType)) != null) {
+                            recordValues.put(targetFieldName, value);
+                        }
+
+                    // dropUnknown == true && coerceTypes == false
+                    } else {
+                        recordValues.put(targetFieldName, attribute.getValue());
+                    }
+                }
+            } else {
+
+                // dropUnknown == false && coerceTypes == true
+                if (coerceTypes) {
+                    Object value;
+                    Optional<RecordField> field = schema.getField(attributeName);
+                    if (field.isPresent()){
+                        if ((value = parseAttributeForType(attribute, attributeName, field.get().getDataType())) != null) {
+                            recordValues.put(targetFieldName, value);
+                        }
+                    } else {
+                        recordValues.put(targetFieldName, attribute.getValue());
+                    }
+
+                    // dropUnknown == false && coerceTypes == false
+                } else {
+                    recordValues.put(targetFieldName, attribute.getValue());
+                }
+            }
+        }
+
+        // parse fields
+        while(xmlEventReader.hasNext()){
+            XMLEvent xmlEvent = xmlEventReader.nextEvent();
+
+            if (xmlEvent.isStartElement()) {
+                StartElement subStartElement = xmlEvent.asStartElement();
+                String fieldName = subStartElement.getName().toString();
+                Optional<RecordField> field = schema.getField(fieldName);
+
+                if (dropUnknown) {
+                    if (field.isPresent()) {
+                        // dropUnknown == true && coerceTypes == true
+                        if (coerceTypes) {
+                            Object value = parseFieldForType(subStartElement, fieldName, field.get().getDataType(), recordValues);
+                            if (value != null) {
+                                recordValues.put(fieldName, value);
+                            }
+
+                        // dropUnknown == true && coerceTypes == false
+                        } else {
+                            // parse unknown type
+                        }
+
+                    } else {
+                        skipElement();
+                    }
+                } else {
+                    // dropUnknown == false && coerceTypes == true
+                    if (coerceTypes) {
+                        if (field.isPresent()) {
+                            Object value = parseFieldForType(subStartElement, fieldName, field.get().getDataType(), recordValues);
+                            if (value != null) {
+                                recordValues.put(fieldName, value);
+                            }
+                        } else {
+                            // parse unknown type
+                        }
+
+                    } else {
+                        // parse unknown type
+                        putUnknownTypeInMap(recordValues, fieldName, parseUnknownField(subStartElement));
+                        //recordValues.put(fieldName, parseUnknownField(subStartElement));
+                    }
+                }
+            } else if (xmlEvent.isEndElement()) {
+                break;
+            }
+        }
+        for (Map.Entry<String,Object> entry : recordValues.entrySet()) {
+            if (entry.getValue() instanceof List) {
+                recordValues.put(entry.getKey(), ((List) entry.getValue()).toArray());
+            }
+        }
+
+        return new MapRecord(schema, recordValues);
+    }
+
+    private void putUnknownTypeInMap(Map<String, Object> values, String fieldName, Object fieldValue) {
+        // returns list or object of other type
+        final Object oldValues = values.get(fieldName);
+
+        if (oldValues != null) {
+            // value already in map
+            if (oldValues instanceof List) {
+                // value already is of type array (list to be converted in map)
+                ((List) oldValues).add(fieldValue);
+            } else {
+                // there is already a value in map but the value is not a list
+                values.put(fieldName, new ArrayList<Object>(){{ add(oldValues); add(fieldValue); }});
+            }
+        } else {
+            // no value in map
+            values.put(fieldName, fieldValue);
+        }
+    }
+
     private Object parseAttributeForType(Attribute attribute, String fieldName, DataType dataType) {
         switch (dataType.getFieldType()) {
             case BOOLEAN:
@@ -198,6 +411,29 @@ public class XMLRecordReader implements RecordReader {
         return null;
     }
 
+
+    private void skipElement() throws XMLStreamException {
+        while(xmlEventReader.hasNext()){
+            XMLEvent xmlEvent = xmlEventReader.nextEvent();
+
+            if (xmlEvent.isStartElement()) {
+                skipElement();
+            }
+            if (xmlEvent.isEndElement()) {
+                return;
+            }
+        }
+    }
+
+    @Override
+    public RecordSchema getSchema() {
+        return null;
+    }
+
+    @Override
+    public void close() throws IOException {
+    }
+    /*
     private Object[] parseArray(StartElement startElement, String fieldName, DataType arrayDataType) throws XMLStreamException {
         // repeating elements should be sufficient
         List<Object> elements = new ArrayList<>();
@@ -219,6 +455,7 @@ public class XMLRecordReader implements RecordReader {
         return elements.toArray();
     }
 
+
     private String extractSimpleValue(StartElement startElement) throws XMLStreamException {
         // throw exception RecordSchemaForXmlException (extends XMLStreamException) man koennte isCharacters, isEndElement nutzen
         XMLEvent xmlEvent;
@@ -228,106 +465,5 @@ public class XMLRecordReader implements RecordReader {
         xmlEventReader.nextEvent();
         return characters.toString();
     }
-
-    private Record parseRecord(StartElement startElement, RecordSchema schema, boolean coerceTypes, boolean dropUnknown) throws XMLStreamException {
-        Map<String, Object> recordValues = new HashMap<>();
-
-        // parse attributes
-        // field content?
-        Iterator iterator = startElement.getAttributes();
-        while (iterator.hasNext()) {
-            Attribute attribute = (Attribute) iterator.next();
-            String fieldName = attribute.getName().toString();
-
-            if (dropUnknown) {
-                Optional<RecordField> field = schema.getField(fieldName);
-                if (field.isPresent()){
-                    if (coerceTypes) {
-                        Object value;
-                        if ((value = parseAttributeForType(attribute, fieldName, field.get().getDataType())) != null) {
-                            recordValues.put(attributePrefix == null ? fieldName : attributePrefix + fieldName, value);
-                        }
-                    } else {
-                        recordValues.put(attributePrefix == null ? fieldName : attributePrefix + fieldName, attribute.getValue());
-                    }
-                }
-            } else {
-                if (coerceTypes) {
-                    Optional<RecordField> field = schema.getField(fieldName);
-                    if (field.isPresent()){
-                        Object value;
-                        if ((value = parseAttributeForType(attribute, fieldName, field.get().getDataType())) != null) {
-                            recordValues.put(attributePrefix == null ? fieldName : attributePrefix + fieldName, value);
-                        }
-                    } else {
-                        recordValues.put(attributePrefix == null ? fieldName : attributePrefix + fieldName, attribute.getValue());
-                    }
-                } else {
-                    recordValues.put(attributePrefix == null ? fieldName : attributePrefix + fieldName, attribute.getValue());
-                }
-            }
-        }
-
-        // parse fields
-        while(xmlEventReader.hasNext()){
-            XMLEvent xmlEvent = xmlEventReader.nextEvent();
-
-            if (xmlEvent.isStartElement()) {
-                StartElement startSubElement = xmlEvent.asStartElement();
-                String fieldName = startSubElement.getName().toString();
-                Optional<RecordField> field = schema.getField(fieldName);
-                if (field.isPresent()){
-                    if (coerceTypes) {
-                        Object value = parseFieldForType(startSubElement, fieldName, field.get().getDataType());
-                        if (value != null) {
-                            recordValues.put(fieldName, value);
-                        }
-                    } else {
-                        // parse unknown type
-                    }
-
-                } else {
-                    if (dropUnknown) {
-                        skipElement();
-                    } else {
-                        // parse unknown type
-                    }
-                }
-            } else if (xmlEvent.isEndElement()) {
-                break;
-            }
-        }
-        return new MapRecord(schema, recordValues);
-    }
-
-    private void skipElement() throws XMLStreamException {
-        while(xmlEventReader.hasNext()){
-            XMLEvent xmlEvent = xmlEventReader.nextEvent();
-
-            if (xmlEvent.isStartElement()) {
-                skipElement();
-            }
-            if (xmlEvent.isEndElement()) {
-                return;
-            }
-        }
-    }
-
-    private void parseFieldForUnknownType() {
-
-    }
-
-
-
-
-
-
-    @Override
-    public RecordSchema getSchema() {
-        return null;
-    }
-
-    @Override
-    public void close() throws IOException {
-    }
+    */
 }

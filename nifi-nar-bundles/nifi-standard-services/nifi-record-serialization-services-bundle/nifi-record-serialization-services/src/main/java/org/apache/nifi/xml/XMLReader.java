@@ -134,6 +134,6 @@ public class XMLReader extends SchemaRegistryService implements RecordReaderFact
         final RecordSchema schema = getSchema(variables, in, null);
 
         // attributeprefix
-        return new XMLRecordReader(in, schema, isArray, xmlPathToRecord, dateFormat, timeFormat, timestampFormat);
+        return new XMLRecordReader(in, schema, isArray, xmlPathToRecord, null, dateFormat, timeFormat, timestampFormat);
     }
 }
