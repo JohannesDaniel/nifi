@@ -161,7 +161,6 @@ public class XMLRecordReader implements RecordReader {
             case ARRAY: {
                 final DataType arrayDataType = ((ArrayDataType) dataType).getElementType();
 
-                // works only for first level, has to be done in parseRecord ???
                 final Object newValue = parseFieldForType(startElement, fieldName, arrayDataType, recordValues);
                 final Object oldValues = recordValues.get(fieldName);
 
@@ -186,6 +185,7 @@ public class XMLRecordReader implements RecordReader {
             }
             case MAP: {
                 // type not supported
+                // skip element?
                 return null;
             }
             case CHOICE: {
@@ -197,17 +197,11 @@ public class XMLRecordReader implements RecordReader {
     }
 
     private Object parseUnknownField(StartElement startElement) throws XMLStreamException {
-        // record for attributes and tags
-        // array for repetitive tags
-        // simple for characters
-
         final String fieldName = startElement.getName().toString();
 
         // attributes
         Map<String, Object> recordValues = new HashMap<>();
         Iterator iterator = startElement.getAttributes();
-
-        // attributePrefix == null ? attributeName : attributePrefix + attributeName
         while (iterator.hasNext()) {
             Attribute attribute = (Attribute) iterator.next();
             final String attributeName = attribute.getName().toString();
@@ -235,24 +229,9 @@ public class XMLRecordReader implements RecordReader {
 
                 putUnknownTypeInMap(recordValues, subFieldName, parseUnknownField(subStartElement));
 
-                /*
-                final Object fieldValue = parseUnknownField(subStartElement);
-                final Object oldValues = recordValues.get(subFieldName);
-
-                if (oldValues != null) {
-                    if (oldValues instanceof List) {
-                        ((List) oldValues).add(fieldValue);
-                    } else {
-                        recordValues.put(subFieldName, new ArrayList<Object>(){{ add(fieldValue); }});
-                    }
-                } else {
-                    recordValues.put(subFieldName, fieldValue);
-                }
-                */
             } else if (xmlEvent.isEndElement()) {
                 break;
             }
-
         }
 
         for (Map.Entry<String,Object> entry : recordValues.entrySet()) {
@@ -272,9 +251,8 @@ public class XMLRecordReader implements RecordReader {
         while (iterator.hasNext()) {
             Attribute attribute = (Attribute) iterator.next();
             String attributeName = attribute.getName().toString();
-            /*
-                Notice that if attributePrefix is set the reader will create a field that has no corresponding schema entry
-             */
+
+            // Notice that if attributePrefix is set the reader will create a field that has no corresponding schema entry
             String targetFieldName = attributePrefix == null ? attributeName : attributePrefix + attributeName;
 
             if (dropUnknown) {
@@ -373,20 +351,15 @@ public class XMLRecordReader implements RecordReader {
     }
 
     private void putUnknownTypeInMap(Map<String, Object> values, String fieldName, Object fieldValue) {
-        // returns list or object of other type
         final Object oldValues = values.get(fieldName);
 
         if (oldValues != null) {
-            // value already in map
             if (oldValues instanceof List) {
-                // value already is of type array (list to be converted in map)
                 ((List) oldValues).add(fieldValue);
             } else {
-                // there is already a value in map but the value is not a list
                 values.put(fieldName, new ArrayList<Object>(){{ add(oldValues); add(fieldValue); }});
             }
         } else {
-            // no value in map
             values.put(fieldName, fieldValue);
         }
     }
@@ -411,7 +384,6 @@ public class XMLRecordReader implements RecordReader {
         return null;
     }
 
-
     private void skipElement() throws XMLStreamException {
         while(xmlEventReader.hasNext()){
             XMLEvent xmlEvent = xmlEventReader.nextEvent();
@@ -427,43 +399,10 @@ public class XMLRecordReader implements RecordReader {
 
     @Override
     public RecordSchema getSchema() {
-        return null;
+        return schema;
     }
 
     @Override
     public void close() throws IOException {
     }
-    /*
-    private Object[] parseArray(StartElement startElement, String fieldName, DataType arrayDataType) throws XMLStreamException {
-        // repeating elements should be sufficient
-        List<Object> elements = new ArrayList<>();
-        while (xmlEventReader.hasNext()) {
-            XMLEvent xmlEvent = xmlEventReader.nextEvent();
-            if (xmlEvent.isStartElement()) {
-                StartElement startSubElement = xmlEvent.asStartElement();
-                Object element = parseFieldForType(startSubElement, fieldName, arrayDataType);
-                elements.add(element);
-            } else if (xmlEvent.isEndElement()){
-                EndElement endElement = xmlEvent.asEndElement();
-                //check not necessary
-                if (endElement.getName().equals(startElement.getName())) {
-                    break;
-                }
-            }
-        }
-
-        return elements.toArray();
-    }
-
-
-    private String extractSimpleValue(StartElement startElement) throws XMLStreamException {
-        // throw exception RecordSchemaForXmlException (extends XMLStreamException) man koennte isCharacters, isEndElement nutzen
-        XMLEvent xmlEvent;
-        Characters characters;
-        xmlEvent = xmlEventReader.nextEvent();
-        characters = xmlEvent.asCharacters();
-        xmlEventReader.nextEvent();
-        return characters.toString();
-    }
-    */
 }

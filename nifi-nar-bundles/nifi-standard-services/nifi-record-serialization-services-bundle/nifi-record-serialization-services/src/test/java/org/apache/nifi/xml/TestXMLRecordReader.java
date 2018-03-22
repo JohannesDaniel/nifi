@@ -14,6 +14,8 @@ import java.io.ByteArrayInputStream;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -30,8 +32,7 @@ public class TestXMLRecordReader {
 
     // recordName - validate? rootName?
     // check for empty content
-    // coerced / unknown
-    // records in array
+    // coerced / unknown --> test for non-attributes
     // exception handling
     // test for schema-xml mismatches
     // finalize
@@ -162,8 +163,6 @@ public class TestXMLRecordReader {
         assertTrue(Arrays.asList(new Object[] {"Elenora Scrivens", "16", "USA", "P4"}).containsAll(Arrays.asList(fourth.getValues())));
         assertEquals("P4", fourth.getAsString("ID"));
     }
-
-    // attribute in record
 
     @Test
     public void testNestedRecord() throws IOException, MalformedRecordException {
@@ -332,15 +331,96 @@ public class TestXMLRecordReader {
 
     @Test
     public void testDeeplyNestedArraysAndRecords() throws IOException, MalformedRecordException {
-        InputStream is = new FileInputStream("src/test/resources/xml/people_complex.xml");
+        InputStream is = new FileInputStream("src/test/resources/xml/people_complex1.xml");
+        XMLRecordReader reader = new XMLRecordReader(is, getSchemaForComplexData(), true, "PERSON", null, dateFormat, timeFormat, timestampFormat);
 
+        Record first = reader.nextRecord(true, true);
+        Object[] grandchildren_arr = (Object[]) first.getValue("CHILDREN");
+        Record first_1_1_1 = (Record)(((Object[])((Record) grandchildren_arr[0]).getValue("CHILD"))[0]);
+        assertEquals("daughter", first_1_1_1.getValue("ROLE"));
+        assertEquals("1-1-1", first_1_1_1.getValue("ID"));
+        assertEquals("Selina", first_1_1_1.getValue("NAME"));
+
+        Record first_1_1_2 = (Record)(((Object[])((Record) grandchildren_arr[0]).getValue("CHILD"))[1]);
+        assertEquals("son", first_1_1_2.getValue("ROLE"));
+        assertEquals("1-1-2", first_1_1_2.getValue("ID"));
+        assertEquals("Hans", first_1_1_2.getValue("NAME"));
+
+        Record first_1_1_3 = (Record)(((Object[])((Record) grandchildren_arr[1]).getValue("CHILD"))[0]);
+        assertEquals("daughter", first_1_1_3.getValue("ROLE"));
+        assertEquals("1-2-1", first_1_1_3.getValue("ID"));
+        assertEquals("Selina2", first_1_1_3.getValue("NAME"));
+
+        Record first_1_1_4 = (Record)(((Object[])((Record) grandchildren_arr[1]).getValue("CHILD"))[1]);
+        assertEquals("son", first_1_1_4.getValue("ROLE"));
+        assertEquals("1-2-2", first_1_1_4.getValue("ID"));
+        assertEquals("Hans2", first_1_1_4.getValue("NAME"));
+
+        Record second = reader.nextRecord(true, true);
+        Object[] grandchildren_arr2 = (Object[]) second.getValue("CHILDREN");
+        Record second_2_1_1 = (Record)(((Object[])((Record) grandchildren_arr2[0]).getValue("CHILD"))[0]);
+        assertEquals("daughter", second_2_1_1.getValue("ROLE"));
+        assertEquals("2-1-1", second_2_1_1.getValue("ID"));
+        assertEquals("Selina3", second_2_1_1.getValue("NAME"));
     }
 
+    @Test
+    public void testDeeplyNestedArraysAndRecords2() throws IOException, MalformedRecordException {
+        InputStream is = new FileInputStream("src/test/resources/xml/people_complex2.xml");
+        XMLRecordReader reader = new XMLRecordReader(is, getSchemaForComplexData2(), true, "PERSON", null, dateFormat, timeFormat, timestampFormat);
+
+        Record first = reader.nextRecord();
+        assertEquals("grandmother", first.getValue("ROLE"));
+        assertEquals("1", first.getValue("ID"));
+        assertEquals("Lisa", first.getValue("NAME"));
+
+        Object[] gm_spouses = (Object[]) first.getValue("CHILDREN");
+        assertEquals(2, gm_spouses.length);
+
+        Object[] gm_spouse1_parents = (Object[]) ((Record) gm_spouses[0]).getValue("CHILD");
+        assertEquals(2, gm_spouse1_parents.length);
+        Record first_1_1 = (Record) gm_spouse1_parents[0];
+        assertEquals("mother", first_1_1.getValue("ROLE"));
+        assertEquals("1-1", first_1_1.getValue("ID"));
+        assertEquals("Anna", first_1_1.getValue("NAME"));
+
+        Object[] gm_spouse1_parent1_first_husband = (Object[]) first_1_1.getValue("CHILDREN");
+        assertEquals(1, gm_spouse1_parent1_first_husband.length);
+        Object[] gm_spouse1_parent1_children = (Object[])((Record) gm_spouse1_parent1_first_husband[0]).getValue("CHILD");
+
+        Record first_1_1_1 = (Record) gm_spouse1_parent1_children[0];
+        assertEquals("daughter", first_1_1_1.getValue("ROLE"));
+        assertEquals("1-1-1", first_1_1_1.getValue("ID"));
+        assertEquals("Selina", first_1_1_1.getValue("NAME"));
+
+        Record first_1_1_2 = (Record) gm_spouse1_parent1_children[1];
+        assertEquals("son", first_1_1_2.getValue("ROLE"));
+        assertEquals("1-1-2", first_1_1_2.getValue("ID"));
+        assertEquals("Hans", first_1_1_2.getValue("NAME"));
+
+        Record first_1_2 = (Record) gm_spouse1_parents[1];
+        assertEquals("mother", first_1_2.getValue("ROLE"));
+        assertEquals("1-2", first_1_2.getValue("ID"));
+        assertEquals("Catrina", first_1_2.getValue("NAME"));
+
+        Object[] gm_spouse2_parents = (Object[]) ((Record) gm_spouses[1]).getValue("CHILD");
+        assertEquals(1, gm_spouse2_parents.length);
+
+        Record second = reader.nextRecord();
+        Record second_2_1_1 = (Record)((Object[])((Record)((Object[])((Record)((Object[])((Record)((Object[]) second
+                .getValue("CHILDREN"))[0])
+                .getValue("CHILD"))[0])
+                .getValue("CHILDREN"))[0])
+                .getValue("CHILD"))[0];
+        assertEquals("daughter", second_2_1_1.getValue("ROLE"));
+        assertEquals("2-1-1", second_2_1_1.getValue("ID"));
+        assertEquals("Selina3", second_2_1_1.getValue("NAME"));
+    }
 
     @Test
     public void testDeeplyNestedArraysAndRecordsIgnoreSchema() throws IOException, MalformedRecordException {
         // minimum number of levels of nesting for arrays and records: 2
-        InputStream is = new FileInputStream("src/test/resources/xml/people_complex.xml");
+        InputStream is = new FileInputStream("src/test/resources/xml/people_complex2.xml");
         XMLRecordReader reader = new XMLRecordReader(is, new SimpleRecordSchema(Collections.emptyList()), true, "PERSON", null, dateFormat, timeFormat, timestampFormat);
         Record first = reader.nextRecord(false, false);
         assertEquals("1", first.getValue("ID"));
@@ -451,27 +531,36 @@ public class TestXMLRecordReader {
     }
 
     private RecordSchema getSchemaForComplexData() {
-        final List<RecordField> fields = getSimpleFieldsForComplexData();
-
-        /*
-        final DataType recordType = RecordFieldType.RECORD.getRecordDataType(new SimpleRecordSchema(nestedArrayField));
-        fields.add(new RecordField("CHILDREN", recordType));
-        */
-
-        final DataType grandchildren = RecordFieldType.RECORD.getRecordDataType(new SimpleRecordSchema(getSimpleFieldsForComplexData()));
-        final DataType grandchildren_arr = RecordFieldType.ARRAY.getArrayDataType(RecordFieldType.RECORD.getDataType());
-
-
-
-        /*
-        final List<RecordField> fields = getSimpleRecordFields();
-        final DataType arrayType = RecordFieldType.ARRAY.getArrayDataType(RecordFieldType.STRING.getDataType());
-        final List<RecordField> nestedArrayField = new ArrayList<RecordField>() {{ add(new RecordField("CHILD", arrayType)); }};
-
-        final DataType recordType = RecordFieldType.RECORD.getRecordDataType(new SimpleRecordSchema(nestedArrayField));
-        fields.add(new RecordField("CHILDREN", recordType));
-        */
-        return new SimpleRecordSchema(fields);
+        final DataType grandchild = RecordFieldType.RECORD.getRecordDataType(new SimpleRecordSchema(getSimpleFieldsForComplexData()));
+        final DataType grandchild_arr1 = RecordFieldType.ARRAY.getArrayDataType(grandchild);
+        final DataType grandchildren = RecordFieldType.RECORD.getRecordDataType(new SimpleRecordSchema(
+                new ArrayList<RecordField>() {{ add(new RecordField("CHILD", grandchild_arr1)); }}));
+        final DataType grandchild_arr = RecordFieldType.ARRAY.getArrayDataType(grandchildren);
+        return new SimpleRecordSchema(
+                new ArrayList<RecordField>() {{ add(new RecordField("CHILDREN", grandchild_arr)); }});
     }
 
+    private RecordSchema getSchemaForComplexData2() {
+        final DataType grandchild = RecordFieldType.RECORD.getRecordDataType(new SimpleRecordSchema(getSimpleFieldsForComplexData()));
+        final DataType grandchild_arr = RecordFieldType.ARRAY.getArrayDataType(grandchild);
+        final DataType grandchildren = RecordFieldType.RECORD.getRecordDataType(new SimpleRecordSchema(
+                new ArrayList<RecordField>() {{ add(new RecordField("CHILD", grandchild_arr)); }}));
+        final DataType grandchildren_arr = RecordFieldType.ARRAY.getArrayDataType(grandchildren);
+        final DataType parent = RecordFieldType.RECORD.getRecordDataType(new SimpleRecordSchema(
+                new ArrayList<RecordField>() {{
+                    add(new RecordField("CHILDREN", grandchildren_arr));
+                    addAll(getSimpleFieldsForComplexData());
+                }}));
+        final DataType parent_arr = RecordFieldType.ARRAY.getArrayDataType(parent);
+        final DataType parents = RecordFieldType.RECORD.getRecordDataType(new SimpleRecordSchema(
+                new ArrayList<RecordField>() {{
+                    add(new RecordField("CHILD", parent_arr));
+                }}));
+        final DataType parents_arr = RecordFieldType.ARRAY.getArrayDataType(parents);
+        final List<RecordField> fields = new ArrayList<RecordField>() {{
+            add(new RecordField("CHILDREN", parents_arr));
+            addAll(getSimpleFieldsForComplexData());
+        }};
+        return new SimpleRecordSchema(fields);
+    }
 }
