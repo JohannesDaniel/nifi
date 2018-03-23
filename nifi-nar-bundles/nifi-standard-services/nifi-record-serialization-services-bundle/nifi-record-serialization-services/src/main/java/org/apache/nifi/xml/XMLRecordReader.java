@@ -1,3 +1,20 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.nifi.xml;
 
 import org.apache.nifi.logging.ComponentLog;
@@ -18,7 +35,6 @@ import javax.xml.stream.XMLInputFactory;
 import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.events.Attribute;
 import javax.xml.stream.events.Characters;
-import javax.xml.stream.events.EndElement;
 import javax.xml.stream.events.StartElement;
 import javax.xml.stream.events.XMLEvent;
 import java.io.IOException;
@@ -32,8 +48,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Supplier;
-
-import static org.apache.nifi.serialization.record.RecordFieldType.ARRAY;
 
 public class XMLRecordReader implements RecordReader {
 
@@ -50,7 +64,6 @@ public class XMLRecordReader implements RecordReader {
     private final Supplier<DateFormat> LAZY_DATE_FORMAT;
     private final Supplier<DateFormat> LAZY_TIME_FORMAT;
     private final Supplier<DateFormat> LAZY_TIMESTAMP_FORMAT;
-
 
     public XMLRecordReader(InputStream in, RecordSchema schema, String rootName, String recordName, String attributePrefix,
                            final String dateFormat, final String timeFormat, final String timestampFormat, final ComponentLog logger) throws MalformedRecordException {
@@ -107,7 +120,8 @@ public class XMLRecordReader implements RecordReader {
                         currentRecordStartTag = startElement;
                         return;
                     } else {
-                        logger.debug("Mismatch between expected record tag name {} and actual tag name in XML {}. Record will be skipped", new Object[] {recordName, startElement.getName().toString()});
+                        logger.debug("Mismatch between expected record tag name {} and actual tag name in XML {}. " +
+                                "Record will be skipped", new Object[] {recordName, startElement.getName().toString()});
                         skipElement();
                     }
                 } else {
@@ -270,7 +284,6 @@ public class XMLRecordReader implements RecordReader {
             final Attribute attribute = (Attribute) iterator.next();
             final String attributeName = attribute.getName().toString();
 
-            // Notice that if attributePrefix is set the reader will create a field that has no corresponding schema entry
             final String targetFieldName = attributePrefix == null ? attributeName : attributePrefix + attributeName;
 
             if (dropUnknown) {

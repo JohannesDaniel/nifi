@@ -1,3 +1,20 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.nifi.xml;
 
 import org.apache.nifi.logging.ComponentLog;
@@ -16,8 +33,6 @@ import java.io.ByteArrayInputStream;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.file.Files;
-import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -33,9 +48,6 @@ public class TestXMLRecordReader {
     private final String dateFormat = RecordFieldType.DATE.getDefaultFormat();
     private final String timeFormat = RecordFieldType.TIME.getDefaultFormat();
     private final String timestampFormat = RecordFieldType.TIMESTAMP.getDefaultFormat();
-
-    // remove red_red, schema
-    // finalize
 
     @Test
     public void testInvalidXml() throws IOException, MalformedRecordException {
@@ -314,7 +326,8 @@ public class TestXMLRecordReader {
     @Test
     public void testSimpleRecordWithAttribute3() throws IOException, MalformedRecordException {
         InputStream is = new FileInputStream("src/test/resources/xml/people.xml");
-        XMLRecordReader reader = new XMLRecordReader(is, new SimpleRecordSchema(Collections.emptyList()), "PEOPLE", "PERSON", null, dateFormat, timeFormat, timestampFormat, Mockito.mock(ComponentLog.class));
+        XMLRecordReader reader = new XMLRecordReader(is, new SimpleRecordSchema(Collections.emptyList()),
+                "PEOPLE", "PERSON", null, dateFormat, timeFormat, timestampFormat, Mockito.mock(ComponentLog.class));
 
         Record first = reader.nextRecord(true, true);
         assertEquals(null, first.getAsString("ID"));
@@ -646,7 +659,8 @@ public class TestXMLRecordReader {
     public void testDeeplyNestedArraysAndRecordsIgnoreSchema() throws IOException, MalformedRecordException {
         // test multiply nested arrays and records (recursion)
         InputStream is = new FileInputStream("src/test/resources/xml/people_complex2.xml");
-        XMLRecordReader reader = new XMLRecordReader(is, new SimpleRecordSchema(Collections.emptyList()), "PEOPLE", "PERSON", null, dateFormat, timeFormat, timestampFormat, Mockito.mock(ComponentLog.class));
+        XMLRecordReader reader = new XMLRecordReader(is, new SimpleRecordSchema(Collections.emptyList()),
+                "PEOPLE", "PERSON", null, dateFormat, timeFormat, timestampFormat, Mockito.mock(ComponentLog.class));
 
         Record first = reader.nextRecord(false, false);
         assertEquals("1", first.getValue("ID"));
@@ -702,7 +716,7 @@ public class TestXMLRecordReader {
                 .getValue("ID"));
     }
 
-    private List<RecordField> getSimpleRecordFields () {
+    private List<RecordField> getSimpleRecordFields() {
         final List<RecordField> fields = new ArrayList<>();
         fields.add(new RecordField("NAME", RecordFieldType.STRING.getDataType()));
         fields.add(new RecordField("AGE", RecordFieldType.INT.getDataType()));
@@ -710,14 +724,14 @@ public class TestXMLRecordReader {
         return fields;
     }
 
-    private List<RecordField> getSimpleRecordFields2 () {
+    private List<RecordField> getSimpleRecordFields2() {
         final List<RecordField> fields = new ArrayList<>();
         fields.add(new RecordField("NAME", RecordFieldType.STRING.getDataType()));
         fields.add(new RecordField("COUNTRY", RecordFieldType.STRING.getDataType()));
         return fields;
     }
 
-    private List<RecordField> getNestedRecordFields () {
+    private List<RecordField> getNestedRecordFields() {
         final List<RecordField> fields = new ArrayList<>();
         fields.add(new RecordField("STREET", RecordFieldType.STRING.getDataType()));
         fields.add(new RecordField("CITY", RecordFieldType.STRING.getDataType()));
