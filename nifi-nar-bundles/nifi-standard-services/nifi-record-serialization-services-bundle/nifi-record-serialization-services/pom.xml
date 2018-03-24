@@ -119,6 +119,7 @@
                         <exclude>src/test/resources/xml/people.xml</exclude>
                         <exclude>src/test/resources/xml/people2.xml</exclude>
                         <exclude>src/test/resources/xml/people3.xml</exclude>
+                        <exclude>src/test/resources/xml/people4.xml</exclude>
                         <exclude>src/test/resources/xml/people_array.xml</exclude>
                         <exclude>src/test/resources/xml/people_array_simple.xml</exclude>
                         <exclude>src/test/resources/xml/people_complex1.xml</exclude>

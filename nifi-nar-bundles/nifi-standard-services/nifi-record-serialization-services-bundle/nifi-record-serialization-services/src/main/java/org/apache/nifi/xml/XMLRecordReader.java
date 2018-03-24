@@ -55,6 +55,7 @@ public class XMLRecordReader implements RecordReader {
     private final RecordSchema schema;
     private final String recordName;
     private final String attributePrefix;
+    private final String contentFieldName;
 
     // thread safety required?
     private StartElement currentRecordStartTag;
@@ -65,11 +66,12 @@ public class XMLRecordReader implements RecordReader {
     private final Supplier<DateFormat> LAZY_TIME_FORMAT;
     private final Supplier<DateFormat> LAZY_TIMESTAMP_FORMAT;
 
-    public XMLRecordReader(InputStream in, RecordSchema schema, String rootName, String recordName, String attributePrefix,
+    public XMLRecordReader(InputStream in, RecordSchema schema, String rootName, String recordName, String attributePrefix, String contentFieldName,
                            final String dateFormat, final String timeFormat, final String timestampFormat, final ComponentLog logger) throws MalformedRecordException {
         this.schema = schema;
         this.recordName = recordName;
         this.attributePrefix = attributePrefix;
+        this.contentFieldName = contentFieldName;
         this.logger = logger;
 
         final DateFormat df = dateFormat == null ? null : DataTypeUtils.getDateFormat(dateFormat);
@@ -86,12 +88,13 @@ public class XMLRecordReader implements RecordReader {
             final StartElement rootTag = getNextStartTag();
 
             // root tag validation
-            if (rootName != null && rootName != rootTag.getName().toString()) {
+            if (rootName != null && !rootName.equals(rootTag.getName().toString())) {
                 final StringBuffer message = new StringBuffer();
-                message.append("Name of root tag ")
+                message.append("Name of root tag \"")
                         .append(rootTag.getName().toString())
-                        .append(" does not match root tag validation ")
-                        .append(rootName);
+                        .append("\" does not match root tag validation \"")
+                        .append(rootName)
+                        .append("\".");
                 throw new MalformedRecordException(message.toString());
             }
             setNextRecordStartTag();
@@ -141,7 +144,11 @@ public class XMLRecordReader implements RecordReader {
         try {
             final Record record = parseRecord(currentRecordStartTag, this.schema, coerceTypes, dropUnknownFields);
             setNextRecordStartTag();
-            return record;
+            if (record != null) {
+                return record;
+            } else {
+                return new MapRecord(this.schema, Collections.EMPTY_MAP);
+            }
         } catch (XMLStreamException e) {
             throw new MalformedRecordException("Could not parse XML", e);
         }
@@ -240,8 +247,9 @@ public class XMLRecordReader implements RecordReader {
                 if (!characters.isWhiteSpace()) {
                     xmlEventReader.nextEvent();
                     if (hasAttributes) {
-                        recordValues.put(fieldName, characters.toString());
-                        xmlEventReader.nextEvent();
+                        if (contentFieldName != null) {
+                            recordValues.put(contentFieldName, characters.toString());
+                        }
                         return new MapRecord(new SimpleRecordSchema(Collections.emptyList()), recordValues);
                     } else {
                         return characters.toString();
@@ -378,9 +386,19 @@ public class XMLRecordReader implements RecordReader {
             } else if (xmlEvent.isEndElement()) {
                 break;
             } else if (xmlEvent.isCharacters()) {
-                if (!xmlEvent.asCharacters().isWhiteSpace()) {
-                    final String message = "Error parsing XML. Either the XML is invalid or there is a mismatch between schema type definitions and XML structure.";
-                    throw new MalformedRecordException(message);
+                final Characters characters = xmlEvent.asCharacters();
+                if (!characters.isWhiteSpace()) {
+                    if (contentFieldName != null) {
+                        final Optional<RecordField> field = schema.getField(contentFieldName);
+                        if (field.isPresent()) {
+                            Object value = parseCharacterForType(characters, contentFieldName, field.get().getDataType());
+                            recordValues.put(contentFieldName, value);
+                        }
+                    } else {
+                        // debug log:
+                    }
+                    // final String message = "Error parsing XML. Either the XML is invalid or there is a mismatch between schema type definitions and XML structure.";
+                    //throw new MalformedRecordException(message);
                 }
             }
         }
@@ -390,7 +408,14 @@ public class XMLRecordReader implements RecordReader {
             }
         }
 
-        return new MapRecord(schema, recordValues);
+        // enable returning null if no field is available
+        // hierarchy level could be communicated with boolean
+        // empty record could be created in method nextRecord
+        if (recordValues.size() > 0) {
+            return new MapRecord(schema, recordValues);
+        } else {
+            return null;
+        }
     }
 
     private void putUnknownTypeInMap(Map<String, Object> values, String fieldName, Object fieldValue) {
@@ -422,6 +447,26 @@ public class XMLRecordReader implements RecordReader {
             case TIME:
             case TIMESTAMP: {
                 return DataTypeUtils.convertType(attribute.getValue(), dataType, LAZY_DATE_FORMAT, LAZY_TIME_FORMAT, LAZY_TIMESTAMP_FORMAT, fieldName);
+            }
+        }
+        return null;
+    }
+
+    private Object parseCharacterForType(Characters character, String fieldName, DataType dataType) {
+        switch (dataType.getFieldType()) {
+            case BOOLEAN:
+            case BYTE:
+            case CHAR:
+            case DOUBLE:
+            case FLOAT:
+            case INT:
+            case LONG:
+            case SHORT:
+            case STRING:
+            case DATE:
+            case TIME:
+            case TIMESTAMP: {
+                return DataTypeUtils.convertType(character.toString(), dataType, LAZY_DATE_FORMAT, LAZY_TIME_FORMAT, LAZY_TIMESTAMP_FORMAT, fieldName);
             }
         }
         return null;

@@ -40,29 +40,34 @@ public class XMLReader extends SchemaRegistryService implements RecordReaderFact
 
     public static final PropertyDescriptor VALIDATE_ROOT_TAG = new PropertyDescriptor.Builder()
             .name("validate_root_tag")
-            .displayName("")
-            .description("")
+            .displayName("validate_root_tag")
+            .description("validate_root_tag")
             .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
-            .expressionLanguageSupported(false)
-            .required(true)
+            .required(false)
             .build();
 
     public static final PropertyDescriptor VALIDATE_RECORD_TAG = new PropertyDescriptor.Builder()
             .name("validate_record_tag")
-            .displayName("")
-            .description("")
+            .displayName("validate_record_tag")
+            .description("validate_record_tag")
             .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
-            .expressionLanguageSupported(false)
-            .required(true)
+            .required(false)
             .build();
 
     public static final PropertyDescriptor ATTRIBUTE_PREFIX = new PropertyDescriptor.Builder()
             .name("attribute_prefix")
-            .displayName("")
-            .description("")
+            .displayName("attribute_prefix")
+            .description("attribute_prefix")
             .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
-            .expressionLanguageSupported(false)
-            .required(true)
+            .required(false)
+            .build();
+
+    public static final PropertyDescriptor CONTENT_FIELD_NAME = new PropertyDescriptor.Builder()
+            .name("content_field_name")
+            .displayName("content_field_name")
+            .description("content_field_name")
+            .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
+            .required(false)
             .build();
 
     private volatile String dateFormat;
@@ -93,10 +98,11 @@ public class XMLReader extends SchemaRegistryService implements RecordReaderFact
         final ConfigurationContext context = getConfigurationContext();
 
         final RecordSchema schema = getSchema(variables, in, null);
-        final String rootName = context.getProperty(VALIDATE_ROOT_TAG).isSet() ? context.getProperty(VALIDATE_ROOT_TAG).getValue() : null;
-        final String recordName = context.getProperty(VALIDATE_RECORD_TAG).isSet() ? context.getProperty(VALIDATE_RECORD_TAG).getValue() : null;
-        final String attributePrefix = context.getProperty(ATTRIBUTE_PREFIX).isSet() ? context.getProperty(ATTRIBUTE_PREFIX).getValue() : null;
+        final String rootName = context.getProperty(VALIDATE_ROOT_TAG).isSet() ? context.getProperty(VALIDATE_ROOT_TAG).getValue().trim() : null;
+        final String recordName = context.getProperty(VALIDATE_RECORD_TAG).isSet() ? context.getProperty(VALIDATE_RECORD_TAG).getValue().trim() : null;
+        final String attributePrefix = context.getProperty(ATTRIBUTE_PREFIX).isSet() ? context.getProperty(ATTRIBUTE_PREFIX).getValue().trim() : null;
+        final String contentFieldName = context.getProperty(CONTENT_FIELD_NAME).isSet() ? context.getProperty(CONTENT_FIELD_NAME).getValue().trim() : null;
 
-        return new XMLRecordReader(in, schema, rootName, recordName, attributePrefix, dateFormat, timeFormat, timestampFormat, logger);
+        return new XMLRecordReader(in, schema, rootName, recordName, attributePrefix, contentFieldName, dateFormat, timeFormat, timestampFormat, logger);
     }
 }
