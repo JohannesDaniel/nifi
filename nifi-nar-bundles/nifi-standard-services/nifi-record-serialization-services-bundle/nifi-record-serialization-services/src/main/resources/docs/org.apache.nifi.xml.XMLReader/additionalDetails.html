@@ -54,14 +54,14 @@
     <code>
             <pre>
                 &lt;record&gt;
-                  &lt;field1&gt;content&lt;/field1&gt;
+                  &lt;simple_field&gt;content&lt;/simple_field&gt;
                 &lt;/record&gt;
             </pre>
     </code>
 
     <p>
         This record can be described by a schema containing one field (e. g. of type string). By providing this schema,
-        the reader expects zero or one occurrences of "field1" in the record.
+        the reader expects zero or one occurrences of "simple_field" in the record.
     </p>
 
     <code>
@@ -71,7 +71,7 @@
                   "name": "person",
                   "type": "record",
                   "fields": [
-                    { "name": "field1", "type": "string" }
+                    { "name": "simple_field", "type": "string" }
                   ]
                 }
             </pre>
@@ -80,17 +80,17 @@
     <h2>Arrays with Simple Types</h2>
 
     <p>
-        Arrays are considered as repetitive tags / fields in XML data. For the following XML data, "field1" is considered
-        to be an array enclosing data of a simple type, whereas "field2" is considered to be a simple type not enclosed in
+        Arrays are considered as repetitive tags / fields in XML data. For the following XML data, "array_field" is considered
+        to be an array enclosing data of a simple type, whereas "simple_field" is considered to be a simple type not enclosed in
         an array.
     </p>
 
     <code>
             <pre>
                 &lt;record&gt;
-                  &lt;field1&gt;content&lt;/field1&gt;
-                  &lt;field1&gt;content&lt;/field1&gt;
-                  &lt;field2&gt;content&lt;/field1&gt;
+                  &lt;array_field&gt;content&lt;/array_field&gt;
+                  &lt;array_field&gt;content&lt;/array_field&gt;
+                  &lt;simple_field&gt;content&lt;/simple_field&gt;
                 &lt;/record&gt;
             </pre>
     </code>
@@ -106,10 +106,10 @@
                   "name": "person",
                   "type": "record",
                   "fields": [
-                    { "name": "field1", "type":
+                    { "name": "array_field", "type":
                       { "type": "array", "items": string }
                     },
-                    { "name": "field2", "type": "string" }
+                    { "name": "simple_field", "type": "string" }
                   ]
                 }
             </pre>
@@ -117,17 +117,158 @@
 
     <p>
         If a field in a schema is embedded in an array, the reader expects zero, one or more occurrences of the field
-        in a record. The field "field1" principally also could be defined as a simple type, but then the second occurrence
-        would replace the first in the record object. Moreover, the field "field2" could also be defined as an array.
-        In this case, the reader would put it into the record object as an array with one element.
+        in a record. The field "array_field" principally also could be defined as a simple type, but then the second occurrence
+        of this field would replace the first in the record object. Moreover, the field "simple_field" could also be defined
+        as an array. In this case, the reader would put it into the record object as an array with one element.
     </p>
 
-    <h2>Simple Types with Attributes</h2>
+    <h2>Tags with Attributes</h2>
 
     <p>
-        The simplest kind of data within XML data are tags only containing content (no attributes, no embedded tags).
-        They can be described in the schema by simple types (e. g. INT, STRING, ...).
+        XML fields frequently not only contain content, but also attributes. The following record contains a field with
+        an attribute "attr" and content:
     </p>
+
+    <code>
+            <pre>
+                &lt;record&gt;
+                  &lt;field_with_attribute attr="attr_content"&gt;content of field&lt;/field_with_attribute&gt;
+                &lt;/record&gt;
+            </pre>
+    </code>
+
+    <p>
+        To parse the content of the field "field_with_attribute" together with the attribute "attr", two requirements have
+        to be fulfilled:
+    </p>
+
+    <ul>
+        <li>In the schema the field has to be defined as record.</li>
+        <li>The property "Field Name for Content" has to be set.</li>
+        <li>As an option, the property "Attribute Prefix" also can be set.</li>
+    </ul>
+
+    <p>
+        For the example above, the following property settings are assumed:
+    </p>
+
+    <table>
+        <tr>
+            <th>Property Name</th>
+            <th>Property Value</th>
+        </tr>
+        <tr>
+            <td>Field Name for Content</td>
+            <td><code>field_name_for_content</code></td>
+        </tr>
+        <tr>
+            <td>Attribute Prefix</td>
+            <td><code>prefix_</code></td>
+        </tr>
+    </table>
+
+    <p>
+        The schema can be defined as follows:
+    </p>
+
+    <code>
+            <pre>
+                {
+                  "name": "testschema",
+                  "namespace": "nifi",
+                  "type": "record",
+                  "fields": [
+                    {
+                      "name": "field_with_attribute",
+                      "type": {
+                        "name": "RecordForTag",
+                        "type": "record",
+                        "fields" : [
+                          {"name": "attr", "type": "string"},
+                          {"name": "field_name_for_content", "type": "string"}
+                        ]
+                    }
+                  ]
+                }
+            </pre>
+    </code>
+
+    <p>
+        Note that the field "field_name_for_content" not only has to be defined in the property section, but also in the
+        schema, whereas the prefix for attributes is not part of the schema. It will be appended when an attribute named
+        "attr" is found at the respective position in the XML data and added to the record. The record object of the above
+        example will be structured as follows:
+    </p>
+
+    <code>
+            <pre>
+                Record (
+                    Record "field_with_attribute" (
+                        RecordField "prefix_attr" = "attr_content",
+                        RecordField "field_name_for_content" = "content of field"
+                    )
+                )
+            </pre>
+    </code>
+
+    <p>
+        Principally, the field "field_with_attribute" could also be defined as a simple type. In this case, the attributes
+        simply would be ignored. Vice versa, the simple type example above could also be defined as a record (assuming that
+        the property "Field Name for Content" is set.
+    </p>
+
+    <h2>Tags within tags</h2>
+
+    <p>
+        XML data is frequently nested. In this case, tags enclose other tags:
+    </p>
+    <code>
+            <pre>
+                &lt;record&gt;
+                  &lt;field_with_embedded_fields attr=&quot;attr_content&quot;&gt;
+                    &lt;embedded_field&gt;embedded content&lt;/embedded_field&gt;
+                    &lt;another_embedded_field&gt;another embedded content&lt;/another_embedded_field&gt;
+                  &lt;/field_with_embedded_fields&gt;
+                &lt;/record&gt;
+            </pre>
+    </code>
+
+    <p>
+        The enclosing fields always have to be defined as records, irrespective whether they include attributes to be
+        parsed or not. In this example, the tag "field_with_embedded_fields" encloses the fields "embedded_field" and
+        "another_embedded_field", which are both fields of simple type. The schema can be defined as follows:
+    </p>
+
+    <code>
+            <pre>
+                {
+                  "name": "testschema",
+                  "namespace": "nifi",
+                  "type": "record",
+                  "fields": [
+                    {
+                      "name": "field_with_embedded_fields",
+                      "type": {
+                        "name": "RecordForEmbedded",
+                        "type": "record",
+                        "fields" : [
+                          {"name": "attr", "type": "string"},
+                          {"name": "embedded_field", "type": "string"}
+                          {"name": "another_embedded_field", "type": "string"}
+                        ]
+                    }
+                  ]
+                }
+            </pre>
+    </code>
+
+    <p>
+        Notice that this case does not require property "Field Name for Content" to be set as this is only required for tags
+        containing attributes and content.
+    </p>
+
+    <h2>Example: Array of records</h2>
+
 
 
     </body>
