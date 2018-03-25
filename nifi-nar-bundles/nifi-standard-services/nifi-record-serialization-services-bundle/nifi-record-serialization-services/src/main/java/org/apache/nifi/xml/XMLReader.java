@@ -40,32 +40,39 @@ public class XMLReader extends SchemaRegistryService implements RecordReaderFact
 
     public static final PropertyDescriptor VALIDATE_ROOT_TAG = new PropertyDescriptor.Builder()
             .name("validate_root_tag")
-            .displayName("validate_root_tag")
-            .description("validate_root_tag")
+            .displayName("Validate Root Tag")
+            .description("If this property is set, the name of root tags (e. g. <root><record>...</record></root>) of incoming FlowFiles will be evaluated against this value. " +
+                    "In the case of a mismatch, an exception is thrown. The treatment of such FlowFiles depends on the implementation " +
+                    "of respective Processors.")
             .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
             .required(false)
             .build();
 
     public static final PropertyDescriptor VALIDATE_RECORD_TAG = new PropertyDescriptor.Builder()
             .name("validate_record_tag")
-            .displayName("validate_record_tag")
-            .description("validate_record_tag")
+            .displayName("Validate Record Tag")
+            .description("If this property is set, the name of record tags (e. g. <root><record>...</record></root>) of incoming FlowFiles will be evaluated against this value. " +
+                    "In the case of a mismatch, the respective record will be skipped. If this property is not set, each level 2 starting tag will be treated " +
+                    "as the beginning of a record.")
             .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
             .required(false)
             .build();
 
     public static final PropertyDescriptor ATTRIBUTE_PREFIX = new PropertyDescriptor.Builder()
             .name("attribute_prefix")
-            .displayName("attribute_prefix")
-            .description("attribute_prefix")
+            .displayName("Attribute Prefix")
+            .description("If this property is set, the name of attributes will be appended by a prefix when they are added to a record.")
             .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
             .required(false)
             .build();
 
     public static final PropertyDescriptor CONTENT_FIELD_NAME = new PropertyDescriptor.Builder()
             .name("content_field_name")
-            .displayName("content_field_name")
-            .description("content_field_name")
+            .displayName("Field Name for Content")
+            .description("If tags with content (e. g. <field>content</field>) are defined as nested records in the schema, " +
+                    "the name of the tag will be used as name for the record and the value of this property will be used as name for the field. " +
+                    "If tags with content shall be parsed together with attributes (e. g. <field attribute=\"123\">content</field>), " +
+                    "they have to be defined as records. For additional information, see the section of processor usage.")
             .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
             .required(false)
             .build();
@@ -87,6 +94,7 @@ public class XMLReader extends SchemaRegistryService implements RecordReaderFact
         properties.add(VALIDATE_ROOT_TAG);
         properties.add(VALIDATE_RECORD_TAG);
         properties.add(ATTRIBUTE_PREFIX);
+        properties.add(CONTENT_FIELD_NAME);
         properties.add(DateTimeUtils.DATE_FORMAT);
         properties.add(DateTimeUtils.TIME_FORMAT);
         properties.add(DateTimeUtils.TIMESTAMP_FORMAT);
