@@ -38,7 +38,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-
 @Tags({"xml", "record", "reader", "parser"})
 @CapabilityDescription("Reads XML content and creates Record objects. Records are expected in the second level of " +
         "XML data, embedded in an enclosing root tag.")
