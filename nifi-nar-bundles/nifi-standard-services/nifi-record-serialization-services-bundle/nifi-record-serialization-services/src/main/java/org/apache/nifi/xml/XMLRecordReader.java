@@ -249,6 +249,9 @@ public class XMLRecordReader implements RecordReader {
                     if (hasAttributes) {
                         if (contentFieldName != null) {
                             recordValues.put(contentFieldName, characters.toString());
+                        } else {
+                            logger.debug("Found content for field that has to be parsed as record but property \"Field Name for Content\" is not set. " +
+                                    "The content will not be added to the record.");
                         }
                         return new MapRecord(new SimpleRecordSchema(Collections.emptyList()), recordValues);
                     } else {
@@ -395,10 +398,9 @@ public class XMLRecordReader implements RecordReader {
                             recordValues.put(contentFieldName, value);
                         }
                     } else {
-                        // debug log:
+                        logger.debug("Found content for field that is defined as record but property \"Field Name for Content\" is not set. " +
+                                "The content will not be added to record.");
                     }
-                    // final String message = "Error parsing XML. Either the XML is invalid or there is a mismatch between schema type definitions and XML structure.";
-                    //throw new MalformedRecordException(message);
                 }
             }
         }
@@ -408,9 +410,6 @@ public class XMLRecordReader implements RecordReader {
             }
         }
 
-        // enable returning null if no field is available
-        // hierarchy level could be communicated with boolean
-        // empty record could be created in method nextRecord
         if (recordValues.size() > 0) {
             return new MapRecord(schema, recordValues);
         } else {

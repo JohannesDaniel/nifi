@@ -17,6 +17,8 @@
 
 package org.apache.nifi.xml;
 
+import org.apache.nifi.annotation.documentation.CapabilityDescription;
+import org.apache.nifi.annotation.documentation.Tags;
 import org.apache.nifi.annotation.lifecycle.OnEnabled;
 import org.apache.nifi.components.PropertyDescriptor;
 import org.apache.nifi.controller.ConfigurationContext;
@@ -36,6 +38,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+
+@Tags({"xml", "record", "reader", "parser"})
+@CapabilityDescription("Reads XML content and creates Record objects. Records are expected in the second level of " +
+        "XML data, embedded in an enclosing root tag.")
 public class XMLReader extends SchemaRegistryService implements RecordReaderFactory {
 
     public static final PropertyDescriptor VALIDATE_ROOT_TAG = new PropertyDescriptor.Builder()
