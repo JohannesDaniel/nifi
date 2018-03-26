@@ -227,8 +227,6 @@ public class XMLRecordReader implements RecordReader {
     }
 
     private Object parseUnknownField(StartElement startElement) throws XMLStreamException {
-        final String fieldName = startElement.getName().toString();
-
         // parse attributes
         final Map<String, Object> recordValues = new HashMap<>();
         final Iterator iterator = startElement.getAttributes();
