@@ -14,16 +14,14 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.nifi.reporting.ambari.api;
 
-public interface MetricFields {
+package org.apache.nifi.controller.status.history;
 
-    String METRIC_NAME = "metricname";
-    String APP_ID = "appid";
-    String INSTANCE_ID = "instanceid";
-    String HOSTNAME = "hostname";
-    String TIMESTAMP = "timestamp";
-    String START_TIME = "starttime";
-    String METRICS = "metrics";
+import java.util.List;
+import java.util.Set;
 
+public interface GarbageCollectionHistory {
+    Set<String> getMemoryManagerNames();
+
+    List<GarbageCollectionStatus> getGarbageCollectionStatuses(String memoryManagerName);
 }

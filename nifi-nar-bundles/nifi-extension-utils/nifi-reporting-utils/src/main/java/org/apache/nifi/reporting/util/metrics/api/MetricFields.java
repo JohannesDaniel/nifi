@@ -14,20 +14,16 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.nifi.authorization.resource;
+package org.apache.nifi.reporting.util.metrics.api;
 
-import org.apache.nifi.authorization.Resource;
+public interface MetricFields {
 
-public class RestrictedComponentsAuthorizable implements Authorizable {
-
-    @Override
-    public Authorizable getParentAuthorizable() {
-        return null;
-    }
-
-    @Override
-    public Resource getResource() {
-        return ResourceFactory.getRestrictedComponentsResource();
-    }
+    String METRIC_NAME = "metricname";
+    String APP_ID = "appid";
+    String INSTANCE_ID = "instanceid";
+    String HOSTNAME = "hostname";
+    String TIMESTAMP = "timestamp";
+    String START_TIME = "starttime";
+    String METRICS = "metrics";
 
 }
