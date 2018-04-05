@@ -294,7 +294,13 @@ SOLR_PARAM_ROWS
         SEARCH_COMPONENTS_ON.addAll(Arrays.asList("true", "on", "yes"));
     }
 
-    private void addSolrParams(final Map<String,String[]> solrParams, final ProcessContext context, final FlowFile flowFile) {
+    private final Map<String,String[]> parseSolrParams(final ProcessContext context, final FlowFile flowFile) {
+
+        final Map<String,String[]> solrParams = new HashMap<>();
+        for (Map.Entry<PropertyDescriptor,String> property : context.getProperties().entrySet()) {
+
+        }
+
         /*
             defType Parameter
             sort Parameter
@@ -304,6 +310,7 @@ SOLR_PARAM_ROWS
             fl (Field List) Parameter
 
          */
+        return solrParams;
     }
 
     @Override
@@ -326,7 +333,7 @@ SOLR_PARAM_ROWS
         final String queryString = context.getProperty(SOLR_PARAM_QUERY).evaluateAttributeExpressions(flowFileRequest).getValue();
 
         // final Map<String,String[]> solrParams = SolrRequestParsers.parseQueryString(queryString).getMap();
-        final Map<String,String[]> solrParams = new HashMap<>();
+        final Map<String,String[]> solrParams = parseSolrParams(context, flowFileRequest);
 
         // begin process solr params
 
@@ -337,8 +344,10 @@ SOLR_PARAM_ROWS
         final Set<String> searchComponents = extractSearchComponents(solrParams);
         final SolrQuery solrQuery = new SolrQuery();
         solrQuery.add(new MultiMapSolrParams(solrParams));
+        // check if params are overridden
 
-        final String requestHandler = context.getProperty(SOLR_PARAM_REQUEST_HANDLER).getValue();
+
+        final String requestHandler = context.getProperty(SOLR_PARAM_REQUEST_HANDLER).evaluateAttributeExpressions(flowFileRequest).getValue();
         solrQuery.setRequestHandler(requestHandler);
 
         final QueryRequest req = new QueryRequest(solrQuery);

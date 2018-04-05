@@ -140,12 +140,12 @@ public class FetchSolrIT {
     @Test
     public void testAllFacetCategories() throws IOException {
         TestRunner runner = createStandardRunner();
-        runner.setProperty(FetchSolr.SOLR_QUERY_STRING, "q=*:*" +
+        /*runner.setProperty(FetchSolr.SOLR_QUERY_STRING, "q=*:*" +
                 "&facet=true&facet.interval=integer_single&facet.interval.set=[4,7]&facet.interval.set=[5,7]" +
                 "&facet.field=integer_multi&facet.query=integer_multi:2" +
                 "&facet.range=created&facet.range.start=NOW/MINUTE&facet.range.end=NOW/MINUTE%2B1MINUTE&facet.range.gap=%2B20SECOND" +
                 "&facet.query=*:*&facet.query=integer_multi:2&facet.query=integer_multi:3"
-        );
+        );*/
 
         runner.enqueue(new ByteArrayInputStream("test".getBytes()));
         runner.run();
@@ -210,7 +210,7 @@ public class FetchSolrIT {
     @Test
     public void testFacetTrueButNull() throws IOException {
         TestRunner runner = createStandardRunner();
-        runner.setProperty(FetchSolr.SOLR_QUERY_STRING, "q=*:*&facet=true&stats=true");
+        //runner.setProperty(FetchSolr.SOLR_QUERY_STRING, "q=*:*&facet=true&stats=true");
         runner.enqueue(new ByteArrayInputStream("test".getBytes()));
         runner.run();
 
@@ -252,7 +252,7 @@ public class FetchSolrIT {
     @Test
     public void testStats() throws IOException {
         TestRunner runner = createStandardRunner();
-        runner.setProperty(FetchSolr.SOLR_QUERY_STRING, "q=*:*&stats=true&stats.field=integer_single");
+        //runner.setProperty(FetchSolr.SOLR_QUERY_STRING, "q=*:*&stats=true&stats.field=integer_single");
         runner.enqueue(new ByteArrayInputStream("test".getBytes()));
         runner.run();
 
@@ -285,7 +285,7 @@ public class FetchSolrIT {
     @Test
     public void testRelationshipRoutings() {
         TestRunner runner = createStandardRunner();
-        runner.setProperty(FetchSolr.SOLR_QUERY_STRING, "q=*:*&facet=true&stats=true");
+        //runner.setProperty(FetchSolr.SOLR_QUERY_STRING, "q=*:*&facet=true&stats=true");
 
         // Set request handler for request failure
         runner.setProperty(FetchSolr.SOLR_PARAM_REQUEST_HANDLER, "/nonexistentrequesthandler");
@@ -361,7 +361,7 @@ public class FetchSolrIT {
     @Test
     public void testExpressionLanguage() {
         TestRunner runner = createStandardRunner();
-        runner.setProperty(FetchSolr.SOLR_QUERY_STRING, "${query}");
+        //runner.setProperty(FetchSolr.SOLR_QUERY_STRING, "${query}");
 
         runner.enqueue(new byte[0], new HashMap<String,String>(){{
             put("query", "q=id:doc0&fl=id");
@@ -376,7 +376,7 @@ public class FetchSolrIT {
     @Test
     public void testStandardResponse() {
         TestRunner runner = createStandardRunner();
-        runner.setProperty(FetchSolr.SOLR_QUERY_STRING, "q=id:(doc0 OR doc1)&fl=id&sort=id desc");
+        //runner.setProperty(FetchSolr.SOLR_QUERY_STRING, "q=id:(doc0 OR doc1)&fl=id&sort=id desc");
 
         runner.setNonLoopConnection(false);
         runner.run();
@@ -396,7 +396,7 @@ public class FetchSolrIT {
     public void testRecordResponse() throws IOException, InitializationException {
         TestRunner runner = createStandardRunner();
         runner.setProperty(FetchSolr.RETURN_TYPE, FetchSolr.MODE_REC.getValue());
-        runner.setProperty(FetchSolr.SOLR_QUERY_STRING, "q=*:*&fl=id,created,integer_single&rows=10");
+        //runner.setProperty(FetchSolr.SOLR_QUERY_STRING, "q=*:*&fl=id,created,integer_single&rows=10");
 
         final String outputSchemaText = new String(Files.readAllBytes(Paths.get("src/test/resources/test-schema.avsc")));
 

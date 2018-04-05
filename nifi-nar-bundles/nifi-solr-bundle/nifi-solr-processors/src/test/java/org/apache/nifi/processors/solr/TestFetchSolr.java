@@ -101,20 +101,39 @@ public class TestFetchSolr {
         }
     }
 
-    @Test
-    public void testAllFacetCategories() throws IOException {
+    private TestRunner createStandardRunner() {
         final TestableProcessor proc = new TestableProcessor(solrClient);
 
         TestRunner runner = TestRunners.newTestRunner(proc);
         runner.setProperty(SolrUtils.SOLR_TYPE, SolrUtils.SOLR_TYPE_STANDARD.getValue());
         runner.setProperty(SolrUtils.SOLR_LOCATION, "http://localhost:8443/solr");
+        runner.setProperty(SolrUtils.COLLECTION, DEFAULT_SOLR_CORE);
+
+        return runner;
+    }
+
+    @Test
+    public void testAllFacetCategories() throws IOException {
+        TestRunner runner = createStandardRunner();
+        runner.setProperty(SolrUtils.SOLR_TYPE, SolrUtils.SOLR_TYPE_STANDARD.getValue());
+        runner.setProperty(SolrUtils.SOLR_LOCATION, "http://localhost:8443/solr");
         runner.setProperty(SolrUtils.COLLECTION, "testCollection");
-        runner.setProperty(FetchSolr.SOLR_QUERY_STRING, "q=*:*" +
-                "&facet=true&facet.interval=integer_single&facet.interval.set=[4,7]&facet.interval.set=[5,7]" +
-                "&facet.field=integer_multi&facet.query=integer_multi:2" +
-                "&facet.range=created&facet.range.start=NOW/MINUTE&facet.range.end=NOW/MINUTE%2B1MINUTE&facet.range.gap=%2B20SECOND" +
-                "&facet.query=*:*&facet.query=integer_multi:2&facet.query=integer_multi:3"
-        );
+        runner.setProperty(FetchSolr.SOLR_PARAM_QUERY, "q=*:*");
+
+        runner.setProperty("facet", "true");
+        runner.setProperty("facet.interval", "integer_single");
+        runner.setProperty("facet.interval.set", "[4,7]");
+        runner.setProperty("facet.interval.set", "[5,7]");
+        runner.setProperty("facet.field", "integer_multi");
+        runner.setProperty("facet.query", "integer_multi:2");
+        runner.setProperty("facet.range", "created");
+        runner.setProperty("facet.range.start", "NOW/MINUTE");
+        runner.setProperty("facet.range.end", "NOW/MINUTE%2B1MINUTE");
+        runner.setProperty("facet.range.gap", "%2B20SECOND");
+        runner.setProperty("facet.query", "*:*");
+        runner.setProperty("facet.query", "integer_multi:2");
+        runner.setProperty("facet.query", "integer_multi:3");
+
         runner.enqueue(new ByteArrayInputStream("test".getBytes()));
         runner.run();
         runner.assertTransferCount(FetchSolr.FACETS, 1);
@@ -173,7 +192,7 @@ public class TestFetchSolr {
         runner.setProperty(SolrUtils.SOLR_TYPE, SolrUtils.SOLR_TYPE_CLOUD.getValue());
         runner.setProperty(SolrUtils.SOLR_LOCATION, "http://localhost:8443/solr");
         runner.setProperty(SolrUtils.COLLECTION, "testCollection");
-        runner.setProperty(FetchSolr.SOLR_QUERY_STRING, "q=*:*&facet=true&stats=true");
+        //runner.setProperty(FetchSolr.SOLR_QUERY_STRING, "q=*:*&facet=true&stats=true");
         runner.enqueue(new ByteArrayInputStream("test".getBytes()));
         runner.run();
 
@@ -219,7 +238,7 @@ public class TestFetchSolr {
         runner.setProperty(SolrUtils.SOLR_TYPE, SolrUtils.SOLR_TYPE_STANDARD.getValue());
         runner.setProperty(SolrUtils.SOLR_LOCATION, "http://localhost:8443/solr");
         runner.setProperty(SolrUtils.COLLECTION, "testCollection");
-        runner.setProperty(FetchSolr.SOLR_QUERY_STRING, "q=*:*&stats=true&stats.field=integer_single");
+        //runner.setProperty(FetchSolr.SOLR_QUERY_STRING, "q=*:*&stats=true&stats.field=integer_single");
         runner.enqueue(new ByteArrayInputStream("test".getBytes()));
         runner.run();
 
@@ -255,7 +274,7 @@ public class TestFetchSolr {
         runner.setProperty(SolrUtils.SOLR_TYPE, SolrUtils.SOLR_TYPE_STANDARD.getValue());
         runner.setProperty(SolrUtils.SOLR_LOCATION, "http://localhost:8443/solr");
         runner.setProperty(SolrUtils.COLLECTION, "testCollection");
-        runner.setProperty(FetchSolr.SOLR_QUERY_STRING, "q=*:*&facet=true&stats=true");
+        //runner.setProperty(FetchSolr.SOLR_QUERY_STRING, "q=*:*&facet=true&stats=true");
 
         // Set request handler for request failure
         runner.setProperty(FetchSolr.SOLR_PARAM_REQUEST_HANDLER, "/nonexistentrequesthandler");
@@ -334,7 +353,7 @@ public class TestFetchSolr {
         runner.setProperty(SolrUtils.SOLR_TYPE, SolrUtils.SOLR_TYPE_STANDARD.getValue());
         runner.setProperty(SolrUtils.SOLR_LOCATION, "http://localhost:8443/solr");
         runner.setProperty(SolrUtils.COLLECTION, "testCollection");
-        runner.setProperty(FetchSolr.SOLR_QUERY_STRING, "${query}");
+        //runner.setProperty(FetchSolr.SOLR_QUERY_STRING, "${query}");
 
         runner.enqueue(new byte[0], new HashMap<String,String>(){{
             put("query", "q=id:doc0&fl=id");
@@ -354,7 +373,7 @@ public class TestFetchSolr {
         runner.setProperty(SolrUtils.SOLR_TYPE, SolrUtils.SOLR_TYPE_CLOUD.getValue());
         runner.setProperty(SolrUtils.SOLR_LOCATION, "http://localhost:8443/solr/testCollection");
         runner.setProperty(SolrUtils.COLLECTION, "testCollection");
-        runner.setProperty(FetchSolr.SOLR_QUERY_STRING, "q=id:(doc0 OR doc1)&fl=id&sort=id desc");
+        //runner.setProperty(FetchSolr.SOLR_QUERY_STRING, "q=id:(doc0 OR doc1)&fl=id&sort=id desc");
 
         runner.setNonLoopConnection(false);
         runner.run();
@@ -379,7 +398,7 @@ public class TestFetchSolr {
         runner.setProperty(FetchSolr.RETURN_TYPE, FetchSolr.MODE_REC.getValue());
         runner.setProperty(SolrUtils.SOLR_LOCATION, "http://localhost:8443/solr");
         runner.setProperty(SolrUtils.COLLECTION, "testCollection");
-        runner.setProperty(FetchSolr.SOLR_QUERY_STRING, "q=*:*&fl=id,created,integer_single&rows=10");
+        //runner.setProperty(FetchSolr.SOLR_QUERY_STRING, "q=*:*&fl=id,created,integer_single&rows=10");
 
         final String outputSchemaText = new String(Files.readAllBytes(Paths.get("src/test/resources/test-schema.avsc")));
 
