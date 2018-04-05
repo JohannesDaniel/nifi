@@ -288,7 +288,7 @@ public class FetchSolrIT {
         runner.setProperty(FetchSolr.SOLR_QUERY_STRING, "q=*:*&facet=true&stats=true");
 
         // Set request handler for request failure
-        runner.setProperty(FetchSolr.REQUEST_HANDLER, "/nonexistentrequesthandler");
+        runner.setProperty(FetchSolr.SOLR_PARAM_REQUEST_HANDLER, "/nonexistentrequesthandler");
 
         // Processor has no input connection and fails
         runner.setNonLoopConnection(false);
@@ -312,7 +312,7 @@ public class FetchSolrIT {
         runner.clearTransferState();
 
         // Set request handler for successful request
-        runner.setProperty(FetchSolr.REQUEST_HANDLER, "/select");
+        runner.setProperty(FetchSolr.SOLR_PARAM_REQUEST_HANDLER, "/select");
 
         // Processor has no input connection and succeeds
         runner.setNonLoopConnection(false);

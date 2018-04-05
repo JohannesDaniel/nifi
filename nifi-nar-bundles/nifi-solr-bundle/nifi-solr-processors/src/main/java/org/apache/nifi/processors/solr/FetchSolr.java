@@ -53,7 +53,6 @@ import org.apache.solr.client.solrj.response.RangeFacet.Count;
 import org.apache.solr.common.params.FacetParams;
 import org.apache.solr.common.params.MultiMapSolrParams;
 import org.apache.solr.common.params.StatsParams;
-import org.apache.solr.servlet.SolrRequestParsers;
 
 import java.io.IOException;
 import java.io.OutputStreamWriter;
@@ -110,15 +109,6 @@ public class FetchSolr extends SolrProcessor {
     public static final String EXCEPTION = "fetchsolr.exeption";
     public static final String EXCEPTION_MESSAGE = "fetchsolr.exeption.message";
 
-    public static final PropertyDescriptor SOLR_QUERY_STRING = new PropertyDescriptor
-            .Builder().name("solr_query_string")
-            .displayName("Solr Query String")
-            .description("A query string to execute against Solr")
-            .required(true)
-            .addValidator(StandardValidators.createAttributeExpressionLanguageValidator(AttributeExpression.ResultType.STRING))
-            .expressionLanguageSupported(true)
-            .defaultValue("q=*:*")
-            .build();
 
     public static final PropertyDescriptor RETURN_TYPE = new PropertyDescriptor
             .Builder().name("Return Type")
@@ -129,14 +119,104 @@ public class FetchSolr extends SolrProcessor {
             .defaultValue(MODE_XML.getValue())
             .build();
 
-    public static final PropertyDescriptor REQUEST_HANDLER = new PropertyDescriptor
-            .Builder().name("request_handler")
+    public static final PropertyDescriptor SOLR_PARAM_QUERY = new PropertyDescriptor
+            .Builder().name("solr_param_query")
+            .displayName("Solr Query")
+            .description("Solr Query, e. g. field:value")
+            .required(true)
+            .addValidator(StandardValidators.createAttributeExpressionLanguageValidator(AttributeExpression.ResultType.STRING))
+            .expressionLanguageSupported(true)
+            .defaultValue("*:*")
+            .build();
+
+    public static final PropertyDescriptor SOLR_PARAM_REQUEST_HANDLER = new PropertyDescriptor
+            .Builder().name("solr_param_request_handler")
             .displayName("Request Handler")
             .description("Define a request handler here, e. g. /query")
             .required(true)
             .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
+            .expressionLanguageSupported(true)
             .defaultValue("/select")
             .build();
+
+    public static final PropertyDescriptor SOLR_PARAM_FILTER_QUERY = new PropertyDescriptor
+            .Builder().name("solr_param_filter_query")
+            .displayName("Filter Query")
+            .description("")
+            .required(false)
+            .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
+            .expressionLanguageSupported(true)
+            .build();
+
+    public static final PropertyDescriptor SOLR_PARAM_FIELD_LIST = new PropertyDescriptor
+            .Builder().name("solr_param_field_list")
+            .displayName("Field List")
+            .description("")
+            .required(false)
+            .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
+            .expressionLanguageSupported(true)
+            .build();
+
+    public static final PropertyDescriptor SOLR_PARAM_SORT = new PropertyDescriptor
+            .Builder().name("solr_param_sort")
+            .displayName("Sorting of result list")
+            .description("")
+            .required(false)
+            .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
+            .expressionLanguageSupported(true)
+            .build();
+
+    public static final PropertyDescriptor SOLR_PARAM_START = new PropertyDescriptor
+            .Builder().name("solr_param_start")
+            .displayName("Start of result list")
+            .description("")
+            .required(false)
+            .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
+            .expressionLanguageSupported(true)
+            .build();
+
+    public static final PropertyDescriptor SOLR_PARAM_ROWS = new PropertyDescriptor
+            .Builder().name("solr_param_rows")
+            .displayName("Number of results to be returned")
+            .description("")
+            .required(false)
+            .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
+            .expressionLanguageSupported(true)
+            .build();
+
+    @Override
+    protected PropertyDescriptor getSupportedDynamicPropertyDescriptor(final String propertyDescriptorName) {
+        return new PropertyDescriptor.Builder()
+                .description("Specifies the value to send for the '" + propertyDescriptorName + "' request parameter")
+                .name(propertyDescriptorName)
+                .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
+                .dynamic(true)
+                .expressionLanguageSupported(true)
+                .build();
+    }
+
+/*
+SOLR_PARAM_QUERY
+SOLR_PARAM_REQUEST_HANDLER
+SOLR_PARAM_FILTER_QUERY
+SOLR_PARAM_FIELD_LIST
+SOLR_PARAM_SORT
+SOLR_PARAM_START
+SOLR_PARAM_ROWS
+ */
+
+
+
+        // properties for solr params
+
+    /*
+        sort Parameter
+        start Parameter
+        rows Parameter
+        fq (Filter Query) Parameter(s)
+        fl (Field List) Parameter
+     */
+
 
     public static final Relationship RESULTS = new Relationship.Builder().name("results")
             .description("Results of Solr queries").build();
@@ -166,14 +246,24 @@ public class FetchSolr extends SolrProcessor {
     protected void init(final ProcessorInitializationContext context) {
         super.init(context);
 
+        // add properties for standard solr params (all with EL)
+        // add dynamic properties (all with EL)
+
         final List<PropertyDescriptor> descriptors = new ArrayList<>();
         descriptors.add(SOLR_TYPE);
         descriptors.add(SOLR_LOCATION);
         descriptors.add(COLLECTION);
-        descriptors.add(SOLR_QUERY_STRING);
         descriptors.add(RETURN_TYPE);
         descriptors.add(RECORD_WRITER);
-        descriptors.add(REQUEST_HANDLER);
+        descriptors.add(SOLR_PARAM_QUERY);
+        descriptors.add(SOLR_PARAM_REQUEST_HANDLER);
+        descriptors.add(SOLR_PARAM_FILTER_QUERY);
+        descriptors.add(SOLR_PARAM_FIELD_LIST);
+        descriptors.add(SOLR_PARAM_SORT);
+        descriptors.add(SOLR_PARAM_START);
+        descriptors.add(SOLR_PARAM_ROWS);
+
+
         descriptors.add(JAAS_CLIENT_APP_NAME);
         descriptors.add(BASIC_USERNAME);
         descriptors.add(BASIC_PASSWORD);
@@ -199,9 +289,21 @@ public class FetchSolr extends SolrProcessor {
     static {
         SUPPORTED_SEARCH_COMPONENTS.addAll(Arrays.asList(StatsParams.STATS, FacetParams.FACET));
     }
-    public static final Set<String> SEARCH_COMPONENTS_ON = new HashSet<String>();
+    public static final Set<String> SEARCH_COMPONENTS_ON = new HashSet<>();
     static {
         SEARCH_COMPONENTS_ON.addAll(Arrays.asList("true", "on", "yes"));
+    }
+
+    private void addSolrParams(final Map<String,String[]> solrParams, final ProcessContext context, final FlowFile flowFile) {
+        /*
+            defType Parameter
+            sort Parameter
+            start Parameter
+            rows Parameter
+            fq (Filter Query) Parameter(s)
+            fl (Field List) Parameter
+
+         */
     }
 
     @Override
@@ -221,14 +323,22 @@ public class FetchSolr extends SolrProcessor {
             keepOriginal = true;
         }
 
-        final String queryString = context.getProperty(SOLR_QUERY_STRING).evaluateAttributeExpressions(flowFileRequest).getValue();
+        final String queryString = context.getProperty(SOLR_PARAM_QUERY).evaluateAttributeExpressions(flowFileRequest).getValue();
 
-        final Map<String,String[]> solrParams = SolrRequestParsers.parseQueryString(queryString).getMap();
+        // final Map<String,String[]> solrParams = SolrRequestParsers.parseQueryString(queryString).getMap();
+        final Map<String,String[]> solrParams = new HashMap<>();
+
+        // begin process solr params
+
+
+
+        // end process solr params
+
         final Set<String> searchComponents = extractSearchComponents(solrParams);
         final SolrQuery solrQuery = new SolrQuery();
         solrQuery.add(new MultiMapSolrParams(solrParams));
 
-        final String requestHandler = context.getProperty(REQUEST_HANDLER).getValue();
+        final String requestHandler = context.getProperty(SOLR_PARAM_REQUEST_HANDLER).getValue();
         solrQuery.setRequestHandler(requestHandler);
 
         final QueryRequest req = new QueryRequest(solrQuery);
