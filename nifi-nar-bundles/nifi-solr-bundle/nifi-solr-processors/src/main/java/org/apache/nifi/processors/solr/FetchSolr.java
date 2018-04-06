@@ -52,6 +52,7 @@ import org.apache.solr.client.solrj.response.RangeFacet;
 import org.apache.solr.client.solrj.response.RangeFacet.Count;
 import org.apache.solr.common.params.FacetParams;
 import org.apache.solr.common.params.MultiMapSolrParams;
+import org.apache.solr.common.params.SolrParams;
 import org.apache.solr.common.params.StatsParams;
 
 import java.io.IOException;
@@ -109,6 +110,14 @@ public class FetchSolr extends SolrProcessor {
     public static final String EXCEPTION = "fetchsolr.exeption";
     public static final String EXCEPTION_MESSAGE = "fetchsolr.exeption.message";
 
+    // validations:
+    // sortings
+    // fields
+    // filter queries (comma separated?)
+    // properties for commits?
+    // facet?
+    // stats?
+
 
     public static final PropertyDescriptor RETURN_TYPE = new PropertyDescriptor
             .Builder().name("Return Type")
@@ -151,7 +160,7 @@ public class FetchSolr extends SolrProcessor {
     public static final PropertyDescriptor SOLR_PARAM_FIELD_LIST = new PropertyDescriptor
             .Builder().name("solr_param_field_list")
             .displayName("Field List")
-            .description("")
+            .description("comma separated")
             .required(false)
             .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
             .expressionLanguageSupported(true)
@@ -171,7 +180,7 @@ public class FetchSolr extends SolrProcessor {
             .displayName("Start of result list")
             .description("")
             .required(false)
-            .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
+            .addValidator(StandardValidators.POSITIVE_INTEGER_VALIDATOR)
             .expressionLanguageSupported(true)
             .build();
 
@@ -180,7 +189,7 @@ public class FetchSolr extends SolrProcessor {
             .displayName("Number of results to be returned")
             .description("")
             .required(false)
-            .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
+            .addValidator(StandardValidators.POSITIVE_INTEGER_VALIDATOR)
             .expressionLanguageSupported(true)
             .build();
 
@@ -194,29 +203,6 @@ public class FetchSolr extends SolrProcessor {
                 .expressionLanguageSupported(true)
                 .build();
     }
-
-/*
-SOLR_PARAM_QUERY
-SOLR_PARAM_REQUEST_HANDLER
-SOLR_PARAM_FILTER_QUERY
-SOLR_PARAM_FIELD_LIST
-SOLR_PARAM_SORT
-SOLR_PARAM_START
-SOLR_PARAM_ROWS
- */
-
-
-
-        // properties for solr params
-
-    /*
-        sort Parameter
-        start Parameter
-        rows Parameter
-        fq (Filter Query) Parameter(s)
-        fl (Field List) Parameter
-     */
-
 
     public static final Relationship RESULTS = new Relationship.Builder().name("results")
             .description("Results of Solr queries").build();
@@ -262,8 +248,6 @@ SOLR_PARAM_ROWS
         descriptors.add(SOLR_PARAM_SORT);
         descriptors.add(SOLR_PARAM_START);
         descriptors.add(SOLR_PARAM_ROWS);
-
-
         descriptors.add(JAAS_CLIENT_APP_NAME);
         descriptors.add(BASIC_USERNAME);
         descriptors.add(BASIC_PASSWORD);
@@ -294,25 +278,6 @@ SOLR_PARAM_ROWS
         SEARCH_COMPONENTS_ON.addAll(Arrays.asList("true", "on", "yes"));
     }
 
-    private final Map<String,String[]> parseSolrParams(final ProcessContext context, final FlowFile flowFile) {
-
-        final Map<String,String[]> solrParams = new HashMap<>();
-        for (Map.Entry<PropertyDescriptor,String> property : context.getProperties().entrySet()) {
-
-        }
-
-        /*
-            defType Parameter
-            sort Parameter
-            start Parameter
-            rows Parameter
-            fq (Filter Query) Parameter(s)
-            fl (Field List) Parameter
-
-         */
-        return solrParams;
-    }
-
     @Override
     public void onTrigger(final ProcessContext context, final ProcessSession session) throws ProcessException {
         final ComponentLog logger = getLogger();
@@ -330,25 +295,56 @@ SOLR_PARAM_ROWS
             keepOriginal = true;
         }
 
-        final String queryString = context.getProperty(SOLR_PARAM_QUERY).evaluateAttributeExpressions(flowFileRequest).getValue();
+        final SolrQuery solrQuery = new SolrQuery();
+
+        solrQuery.setQuery(context.getProperty(SOLR_PARAM_QUERY).evaluateAttributeExpressions(flowFileRequest).getValue());
+        solrQuery.setRequestHandler(context.getProperty(SOLR_PARAM_REQUEST_HANDLER).evaluateAttributeExpressions(flowFileRequest).getValue());
+
+        if (context.getProperty(SOLR_PARAM_FILTER_QUERY).isSet()) {
+            solrQuery.addFilterQuery(context.getProperty(SOLR_PARAM_FILTER_QUERY).evaluateAttributeExpressions(flowFileRequest).getValue());
+        }
+
+        // Splitting stuff should be done in validation
+        if (context.getProperty(SOLR_PARAM_FIELD_LIST).isSet()) {
+            for (final String field : context.getProperty(SOLR_PARAM_FIELD_LIST).evaluateAttributeExpressions(flowFileRequest).getValue()
+                    .split(",")) {
+                solrQuery.addField(field.trim());
+            }
+        }
+
+        // Splitting stuff should be done in validation
+        if (context.getProperty(SOLR_PARAM_SORT).isSet()) {
+            List<SolrQuery.SortClause> sortings = new ArrayList<>();
+            for (String sorting : context.getProperty(SOLR_PARAM_SORT).evaluateAttributeExpressions(flowFileRequest).getValue()
+                    .split(",")) {
+                // String[]
+            }
+
+            // solrQuery.setSorts();
+        }
+
+        if (context.getProperty(SOLR_PARAM_START).isSet()) {
+            solrQuery.setStart(Integer.parseInt(context.getProperty(SOLR_PARAM_START).evaluateAttributeExpressions(flowFileRequest).getValue()));
+        }
+
+        if (context.getProperty(SOLR_PARAM_ROWS).isSet()) {
+            solrQuery.setRows(Integer.parseInt(context.getProperty(SOLR_PARAM_ROWS).evaluateAttributeExpressions(flowFileRequest).getValue()));
+        }
+
+        final Map<String,String[]> additionalSolrParams = SolrUtils.getRequestParams(context, flowFileRequest);
 
         // final Map<String,String[]> solrParams = SolrRequestParsers.parseQueryString(queryString).getMap();
-        final Map<String,String[]> solrParams = parseSolrParams(context, flowFileRequest);
 
-        // begin process solr params
+        for (Map.Entry<String,String[]> entry : additionalSolrParams.entrySet()) {
+            System.out.println(entry.getKey() + "=" + Arrays.asList(entry.getValue()));
+        }
 
 
-
-        // end process solr params
-
-        final Set<String> searchComponents = extractSearchComponents(solrParams);
-        final SolrQuery solrQuery = new SolrQuery();
-        solrQuery.add(new MultiMapSolrParams(solrParams));
+        final Set<String> searchComponents = extractSearchComponents(additionalSolrParams);
+        solrQuery.add(new MultiMapSolrParams(additionalSolrParams));
         // check if params are overridden
 
 
-        final String requestHandler = context.getProperty(SOLR_PARAM_REQUEST_HANDLER).evaluateAttributeExpressions(flowFileRequest).getValue();
-        solrQuery.setRequestHandler(requestHandler);
 
         final QueryRequest req = new QueryRequest(solrQuery);
 

@@ -20,6 +20,7 @@
 package org.apache.nifi.processors.solr;
 
 import com.google.gson.stream.JsonReader;
+import org.apache.nifi.flowfile.FlowFile;
 import org.apache.nifi.json.JsonRecordSetWriter;
 import org.apache.nifi.processor.ProcessContext;
 import org.apache.nifi.reporting.InitializationException;
@@ -29,9 +30,7 @@ import org.apache.nifi.util.TestRunner;
 import org.apache.nifi.util.TestRunners;
 import org.apache.solr.client.solrj.SolrClient;
 import org.apache.solr.common.SolrInputDocument;
-import org.junit.After;
 import org.junit.Assert;
-import org.junit.Before;
 import org.junit.Test;
 import org.xmlunit.matchers.CompareMatcher;
 
@@ -44,6 +43,7 @@ import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Locale;
+import java.util.Map;
 import java.util.TimeZone;
 
 import static org.junit.Assert.assertEquals;
@@ -60,8 +60,7 @@ public class TestFetchSolr {
 
     private SolrClient solrClient;
 
-    @Before
-    public void setup() {
+    public SolrClient createSolrClient() {
         try {
             // create an EmbeddedSolrServer for the processor to use
             String relPath = getClass().getProtectionDomain().getCodeSource()
@@ -91,9 +90,10 @@ public class TestFetchSolr {
             e.printStackTrace();
             Assert.fail(e.getMessage());
         }
+
+        return solrClient;
     }
 
-    @After
     public void teardown() {
         try {
             solrClient.close();
@@ -101,7 +101,7 @@ public class TestFetchSolr {
         }
     }
 
-    private TestRunner createStandardRunner() {
+    private TestRunner createRunnerWithSolrClient(SolrClient solrClient) {
         final TestableProcessor proc = new TestableProcessor(solrClient);
 
         TestRunner runner = TestRunners.newTestRunner(proc);
@@ -112,29 +112,58 @@ public class TestFetchSolr {
         return runner;
     }
 
-    @Test
-    public void testAllFacetCategories() throws IOException {
-        TestRunner runner = createStandardRunner();
+    private TestRunner createRunner() {
+        final TestableProcessor proc = new TestableProcessor(null);
+
+        TestRunner runner = TestRunners.newTestRunner(proc);
         runner.setProperty(SolrUtils.SOLR_TYPE, SolrUtils.SOLR_TYPE_STANDARD.getValue());
         runner.setProperty(SolrUtils.SOLR_LOCATION, "http://localhost:8443/solr");
-        runner.setProperty(SolrUtils.COLLECTION, "testCollection");
-        runner.setProperty(FetchSolr.SOLR_PARAM_QUERY, "q=*:*");
+        runner.setProperty(SolrUtils.COLLECTION, DEFAULT_SOLR_CORE);
+
+        return runner;
+    }
+
+    @Test
+    public void testRepeatingParams() {
+        TestRunner runner = createRunner();
+        runner.enqueue("".getBytes(), new HashMap<String,String>(){{ put("key1", "value1"); }});
+
+        runner.setProperty("facet.field.1", "123");
+        runner.setProperty("facet.field.2", "other_field");
+        runner.setProperty("f.123.facet.prefix", "pre");
+
+        ProcessContext context = runner.getProcessContext();
+        FlowFile flowFile = runner.getProcessSessionFactory().createSession().get();
+
+        Map<String,String[]> solrParams = SolrUtils.getRequestParams(context, flowFile);
+
+        String[] facet_fields = solrParams.get("facet.field");
+        assertEquals(2, facet_fields.length);
+        assertEquals("123", facet_fields[0]);
+        assertEquals("other_field", facet_fields[1]);
+        assertEquals("pre", solrParams.get("f.123.facet.prefix")[0]);
+    }
+
+    @Test
+    public void testAllFacetCategories() throws IOException {
+        SolrClient solrClient = createSolrClient();
+
+        TestRunner runner = createRunnerWithSolrClient(solrClient);
 
         runner.setProperty("facet", "true");
-        runner.setProperty("facet.interval", "integer_single");
-        runner.setProperty("facet.interval.set", "[4,7]");
-        runner.setProperty("facet.interval.set", "[5,7]");
         runner.setProperty("facet.field", "integer_multi");
-        runner.setProperty("facet.query", "integer_multi:2");
+        runner.setProperty("facet.interval", "integer_single");
+        runner.setProperty("facet.interval.set.1", "[4,7]");
+        runner.setProperty("facet.interval.set.2", "[5,7]");
         runner.setProperty("facet.range", "created");
         runner.setProperty("facet.range.start", "NOW/MINUTE");
-        runner.setProperty("facet.range.end", "NOW/MINUTE%2B1MINUTE");
-        runner.setProperty("facet.range.gap", "%2B20SECOND");
-        runner.setProperty("facet.query", "*:*");
-        runner.setProperty("facet.query", "integer_multi:2");
-        runner.setProperty("facet.query", "integer_multi:3");
+        runner.setProperty("facet.range.end", "NOW/MINUTE+1MINUTE");
+        runner.setProperty("facet.range.gap", "+20SECOND");
+        runner.setProperty("facet.query.1", "*:*");
+        runner.setProperty("facet.query.2", "integer_multi:2");
+        runner.setProperty("facet.query.3", "integer_multi:3");
 
-        runner.enqueue(new ByteArrayInputStream("test".getBytes()));
+        runner.enqueue(new ByteArrayInputStream(new byte[0]));
         runner.run();
         runner.assertTransferCount(FetchSolr.FACETS, 1);
 
@@ -144,7 +173,7 @@ public class TestFetchSolr {
         while (reader.hasNext()) {
             String name = reader.nextName();
             if (name.equals("facet_queries")) {
-                assertEquals(returnCheckSumForArrayOfJsonObjects(reader), 30);
+                assertEquals(30, returnCheckSumForArrayOfJsonObjects(reader));
             } else if (name.equals("facet_fields")) {
                 reader.beginObject();
                 assertEquals(reader.nextName(), "integer_multi");
@@ -164,6 +193,7 @@ public class TestFetchSolr {
         }
         reader.endObject();
         reader.close();
+        solrClient.close();
     }
 
     private int returnCheckSumForArrayOfJsonObjects(JsonReader reader) throws IOException {
