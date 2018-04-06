@@ -27,6 +27,8 @@ import org.apache.nifi.annotation.documentation.CapabilityDescription;
 import org.apache.nifi.annotation.documentation.Tags;
 import org.apache.nifi.components.AllowableValue;
 import org.apache.nifi.components.PropertyDescriptor;
+import org.apache.nifi.components.ValidationContext;
+import org.apache.nifi.components.ValidationResult;
 import org.apache.nifi.expression.AttributeExpression;
 import org.apache.nifi.flowfile.FlowFile;
 import org.apache.nifi.flowfile.attributes.CoreAttributes;
@@ -59,6 +61,7 @@ import java.io.IOException;
 import java.io.OutputStreamWriter;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -193,6 +196,42 @@ public class FetchSolr extends SolrProcessor {
             .expressionLanguageSupported(true)
             .build();
 
+    public static final PropertyDescriptor SOLR_PARAM_FACET = new PropertyDescriptor
+            .Builder().name("solr_param_rows")
+            .displayName("Number of results to be returned")
+            .description("")
+            .required(false)
+            .addValidator(StandardValidators.POSITIVE_INTEGER_VALIDATOR)
+            .expressionLanguageSupported(true)
+            .build();
+
+    public static final PropertyDescriptor SOLR_PARAM_FACET_FIELDS = new PropertyDescriptor
+            .Builder().name("solr_param_rows")
+            .displayName("Number of results to be returned")
+            .description("")
+            .required(false)
+            .addValidator(StandardValidators.POSITIVE_INTEGER_VALIDATOR)
+            .expressionLanguageSupported(true)
+            .build();
+
+    public static final PropertyDescriptor SOLR_PARAM_STATS = new PropertyDescriptor
+            .Builder().name("solr_param_rows")
+            .displayName("Number of results to be returned")
+            .description("")
+            .required(false)
+            .addValidator(StandardValidators.POSITIVE_INTEGER_VALIDATOR)
+            .expressionLanguageSupported(true)
+            .build();
+
+    public static final PropertyDescriptor SOLR_PARAM_STATS_FIELDS = new PropertyDescriptor
+            .Builder().name("solr_param_rows")
+            .displayName("Number of results to be returned")
+            .description("")
+            .required(false)
+            .addValidator(StandardValidators.POSITIVE_INTEGER_VALIDATOR)
+            .expressionLanguageSupported(true)
+            .build();
+
     @Override
     protected PropertyDescriptor getSupportedDynamicPropertyDescriptor(final String propertyDescriptorName) {
         return new PropertyDescriptor.Builder()
@@ -269,13 +308,34 @@ public class FetchSolr extends SolrProcessor {
         this.relationships = Collections.unmodifiableSet(relationships);
     }
 
-    public static final Set<String> SUPPORTED_SEARCH_COMPONENTS = new HashSet<String>();
+    public static final Set<String> SUPPORTED_SEARCH_COMPONENTS = new HashSet<>();
     static {
         SUPPORTED_SEARCH_COMPONENTS.addAll(Arrays.asList(StatsParams.STATS, FacetParams.FACET));
     }
+
     public static final Set<String> SEARCH_COMPONENTS_ON = new HashSet<>();
     static {
         SEARCH_COMPONENTS_ON.addAll(Arrays.asList("true", "on", "yes"));
+    }
+
+    @Override
+    protected final Collection<ValidationResult> additionalCustomValidation(ValidationContext context) {
+        final Collection<ValidationResult> problems = new ArrayList<>();
+
+        if (context.getProperty(RETURN_TYPE).evaluateAttributeExpressions().getValue().equals(MODE_REC.getValue())
+                && !context.getProperty(RECORD_WRITER).isSet()) {
+            problems.add(new ValidationResult.Builder()
+                    .explanation("for writing records a record writer has to be configured")
+                    .valid(false)
+                    .subject("Record writer check")
+                    .build());
+        }
+
+        // sort
+
+        // fields
+
+        return problems;
     }
 
     @Override

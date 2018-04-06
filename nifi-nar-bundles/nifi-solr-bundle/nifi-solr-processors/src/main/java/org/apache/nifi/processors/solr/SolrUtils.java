@@ -191,6 +191,7 @@ public class SolrUtils {
             .defaultValue("10 seconds")
             .build();
 
+    // will not match all possible field names
     public static final String REPEATING_PARAM_PATTERN = "[\\w\\.]+\\.\\d+$";
 
 

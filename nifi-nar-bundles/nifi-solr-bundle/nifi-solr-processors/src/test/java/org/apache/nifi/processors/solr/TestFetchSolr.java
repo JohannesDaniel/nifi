@@ -147,7 +147,6 @@ public class TestFetchSolr {
     @Test
     public void testAllFacetCategories() throws IOException {
         SolrClient solrClient = createSolrClient();
-
         TestRunner runner = createRunnerWithSolrClient(solrClient);
 
         runner.setProperty("facet", "true");
@@ -216,12 +215,9 @@ public class TestFetchSolr {
 
     @Test
     public void testFacetTrueButNull() throws IOException {
-        final TestableProcessor proc = new TestableProcessor(solrClient);
+        SolrClient solrClient = createSolrClient();
+        TestRunner runner = createRunnerWithSolrClient(solrClient);
 
-        TestRunner runner = TestRunners.newTestRunner(proc);
-        runner.setProperty(SolrUtils.SOLR_TYPE, SolrUtils.SOLR_TYPE_CLOUD.getValue());
-        runner.setProperty(SolrUtils.SOLR_LOCATION, "http://localhost:8443/solr");
-        runner.setProperty(SolrUtils.COLLECTION, "testCollection");
         //runner.setProperty(FetchSolr.SOLR_QUERY_STRING, "q=*:*&facet=true&stats=true");
         runner.enqueue(new ByteArrayInputStream("test".getBytes()));
         runner.run();
