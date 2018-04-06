@@ -99,7 +99,7 @@ import static org.apache.nifi.processors.solr.SolrUtils.RECORD_WRITER;
         @WritesAttribute(attribute = "fetchsolr.exeption.class", description = "The Java exception class raised when the processor fails"),
         @WritesAttribute(attribute = "fetchsolr.exeption.message", description = "The Java exception message raised when the processor fails")
 })
-public class FetchSolr extends SolrProcessor {
+public class QuerySolr extends SolrProcessor {
 
     public static final AllowableValue MODE_XML = new AllowableValue("XML");
     public static final AllowableValue MODE_REC = new AllowableValue("Records");
