@@ -25,6 +25,7 @@ import org.apache.nifi.annotation.behavior.WritesAttribute;
 import org.apache.nifi.annotation.behavior.WritesAttributes;
 import org.apache.nifi.annotation.documentation.CapabilityDescription;
 import org.apache.nifi.annotation.documentation.Tags;
+import org.apache.nifi.annotation.lifecycle.OnScheduled;
 import org.apache.nifi.components.AllowableValue;
 import org.apache.nifi.components.PropertyDescriptor;
 import org.apache.nifi.components.ValidationContext;
@@ -45,6 +46,7 @@ import org.apache.nifi.serialization.RecordSetWriterFactory;
 import org.apache.nifi.serialization.record.RecordSchema;
 import org.apache.nifi.serialization.record.RecordSet;
 import org.apache.solr.client.solrj.SolrQuery;
+import org.apache.solr.client.solrj.SolrServerException;
 import org.apache.solr.client.solrj.request.QueryRequest;
 import org.apache.solr.client.solrj.response.FacetField;
 import org.apache.solr.client.solrj.response.FieldStatsInfo;
@@ -52,6 +54,7 @@ import org.apache.solr.client.solrj.response.IntervalFacet;
 import org.apache.solr.client.solrj.response.QueryResponse;
 import org.apache.solr.client.solrj.response.RangeFacet;
 import org.apache.solr.client.solrj.response.RangeFacet.Count;
+import org.apache.solr.common.params.CommonParams;
 import org.apache.solr.common.params.FacetParams;
 import org.apache.solr.common.params.MultiMapSolrParams;
 import org.apache.solr.common.params.SolrParams;
@@ -95,6 +98,9 @@ import static org.apache.nifi.processors.solr.SolrUtils.RECORD_WRITER;
         @WritesAttribute(attribute = "solr.cursor.mark", description = "Cursor mark can be used for scrolling Solr"),
         @WritesAttribute(attribute = "solr.status.code", description = "Status code of Solr request. A status code of 0 indicates that the request was successfully processed"),
         @WritesAttribute(attribute = "solr.query.time", description = "The elapsed time to process the query (in ms)"),
+        @WritesAttribute(attribute = "solr.start", description = "Solr start parameter (result offset) for the query"),
+        @WritesAttribute(attribute = "solr.rows", description = "Number of Solr documents to be returned for the query"),
+        @WritesAttribute(attribute = "solr.number.results", description = "Number of Solr documents that match the query"),
         @WritesAttribute(attribute = "mime.type", description = "The mime type of the data format"),
         @WritesAttribute(attribute = "fetchsolr.exeption.class", description = "The Java exception class raised when the processor fails"),
         @WritesAttribute(attribute = "fetchsolr.exeption.message", description = "The Java exception message raised when the processor fails")
@@ -103,27 +109,25 @@ public class QuerySolr extends SolrProcessor {
 
     public static final AllowableValue MODE_XML = new AllowableValue("XML");
     public static final AllowableValue MODE_REC = new AllowableValue("Records");
+
+    public static final AllowableValue RETURN_TOP_RESULTS = new AllowableValue("return_only_top_results", "Only top results");
+    public static final AllowableValue RETURN_ALL_RESULTS = new AllowableValue("return_all_results", "Entire results");
+
     public static final String MIME_TYPE_JSON = "application/json";
     public static final String ATTRIBUTE_SOLR_CONNECT = "solr.connect";
     public static final String ATTRIBUTE_SOLR_COLLECTION = "solr.collection";
     public static final String ATTRIBUTE_SOLR_QUERY = "solr.query";
     public static final String ATTRIBUTE_CURSOR_MARK = "solr.cursor.mark";
     public static final String ATTRIBUTE_SOLR_STATUS = "solr.status.code";
+    public static final String ATTRIBUTE_SOLR_START = "solr.start";
+    public static final String ATTRIBUTE_SOLR_ROWS = "solr.rows";
+    public static final String ATTRIBUTE_SOLR_NUMBER_RESULTS = "solr.number.results";
     public static final String ATTRIBUTE_QUERY_TIME = "solr.query.time";
     public static final String EXCEPTION = "fetchsolr.exeption";
     public static final String EXCEPTION_MESSAGE = "fetchsolr.exeption.message";
 
-    // validations:
-    // sortings
-    // fields
-    // filter queries (comma separated?)
-    // properties for commits?
-    // facet?
-    // stats?
-
-
     public static final PropertyDescriptor RETURN_TYPE = new PropertyDescriptor
-            .Builder().name("Return Type")
+            .Builder().name("return_type")
             .displayName("Return Type")
             .description("Output format of Solr results. Write Solr documents to FlowFiles as XML or using a Record Writer")
             .required(true)
@@ -151,19 +155,10 @@ public class QuerySolr extends SolrProcessor {
             .defaultValue("/select")
             .build();
 
-    public static final PropertyDescriptor SOLR_PARAM_FILTER_QUERY = new PropertyDescriptor
-            .Builder().name("solr_param_filter_query")
-            .displayName("Filter Query")
-            .description("")
-            .required(false)
-            .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
-            .expressionLanguageSupported(true)
-            .build();
-
     public static final PropertyDescriptor SOLR_PARAM_FIELD_LIST = new PropertyDescriptor
             .Builder().name("solr_param_field_list")
             .displayName("Field List")
-            .description("comma separated")
+            .description("Comma separated list of fields to be included into results, e. g. field1,field2")
             .required(false)
             .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
             .expressionLanguageSupported(true)
@@ -172,7 +167,7 @@ public class QuerySolr extends SolrProcessor {
     public static final PropertyDescriptor SOLR_PARAM_SORT = new PropertyDescriptor
             .Builder().name("solr_param_sort")
             .displayName("Sorting of result list")
-            .description("")
+            .description("Comma separated sort clauses to define the sorting of results, e. g. field1 asc, field2 desc")
             .required(false)
             .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
             .expressionLanguageSupported(true)
@@ -180,8 +175,8 @@ public class QuerySolr extends SolrProcessor {
 
     public static final PropertyDescriptor SOLR_PARAM_START = new PropertyDescriptor
             .Builder().name("solr_param_start")
-            .displayName("Start of result list")
-            .description("")
+            .displayName("Start of results")
+            .description("Offset of result set")
             .required(false)
             .addValidator(StandardValidators.POSITIVE_INTEGER_VALIDATOR)
             .expressionLanguageSupported(true)
@@ -189,53 +184,30 @@ public class QuerySolr extends SolrProcessor {
 
     public static final PropertyDescriptor SOLR_PARAM_ROWS = new PropertyDescriptor
             .Builder().name("solr_param_rows")
-            .displayName("Number of results to be returned")
-            .description("")
+            .displayName("Rows")
+            .description("Number of results to be returned for a single request")
             .required(false)
             .addValidator(StandardValidators.POSITIVE_INTEGER_VALIDATOR)
             .expressionLanguageSupported(true)
             .build();
 
-    public static final PropertyDescriptor SOLR_PARAM_FACET = new PropertyDescriptor
-            .Builder().name("solr_param_rows")
-            .displayName("Number of results to be returned")
-            .description("")
-            .required(false)
-            .addValidator(StandardValidators.POSITIVE_INTEGER_VALIDATOR)
-            .expressionLanguageSupported(true)
-            .build();
-
-    public static final PropertyDescriptor SOLR_PARAM_FACET_FIELDS = new PropertyDescriptor
-            .Builder().name("solr_param_rows")
-            .displayName("Number of results to be returned")
-            .description("")
-            .required(false)
-            .addValidator(StandardValidators.POSITIVE_INTEGER_VALIDATOR)
-            .expressionLanguageSupported(true)
-            .build();
-
-    public static final PropertyDescriptor SOLR_PARAM_STATS = new PropertyDescriptor
-            .Builder().name("solr_param_rows")
-            .displayName("Number of results to be returned")
-            .description("")
-            .required(false)
-            .addValidator(StandardValidators.POSITIVE_INTEGER_VALIDATOR)
-            .expressionLanguageSupported(true)
-            .build();
-
-    public static final PropertyDescriptor SOLR_PARAM_STATS_FIELDS = new PropertyDescriptor
-            .Builder().name("solr_param_rows")
-            .displayName("Number of results to be returned")
-            .description("")
-            .required(false)
-            .addValidator(StandardValidators.POSITIVE_INTEGER_VALIDATOR)
-            .expressionLanguageSupported(true)
+    public static final PropertyDescriptor AMOUNT_DOCUMENTS_TO_RETURN = new PropertyDescriptor
+            .Builder().name("amount_documents_to_return")
+            .displayName("Total amount of returned results")
+            .description("Total amount of Solr documents to be returned. If this property is set to \"Only top results\", " +
+                    "only single requests will be sent to Solr and the results will be written into single FlowFiles. If it is set to " +
+                    "\"Entire results\", all results matching to the query are retrieved via multiple Solr requests and " +
+                    "returned in multiple FlowFiles. For both options, the number of Solr documents to be returned in a FlowFile depends on " +
+                    "the configuration of the \"Rows\" property")
+            .required(true)
+            .allowableValues(RETURN_ALL_RESULTS, RETURN_TOP_RESULTS)
+            .defaultValue(RETURN_TOP_RESULTS.getValue())
             .build();
 
     @Override
     protected PropertyDescriptor getSupportedDynamicPropertyDescriptor(final String propertyDescriptorName) {
         return new PropertyDescriptor.Builder()
-                .description("Specifies the value to send for the '" + propertyDescriptorName + "' request parameter")
+                .description("Specifies the value to send for the '" + propertyDescriptorName + "' Solr parameter")
                 .name(propertyDescriptorName)
                 .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
                 .dynamic(true)
@@ -271,9 +243,6 @@ public class QuerySolr extends SolrProcessor {
     protected void init(final ProcessorInitializationContext context) {
         super.init(context);
 
-        // add properties for standard solr params (all with EL)
-        // add dynamic properties (all with EL)
-
         final List<PropertyDescriptor> descriptors = new ArrayList<>();
         descriptors.add(SOLR_TYPE);
         descriptors.add(SOLR_LOCATION);
@@ -282,11 +251,11 @@ public class QuerySolr extends SolrProcessor {
         descriptors.add(RECORD_WRITER);
         descriptors.add(SOLR_PARAM_QUERY);
         descriptors.add(SOLR_PARAM_REQUEST_HANDLER);
-        descriptors.add(SOLR_PARAM_FILTER_QUERY);
         descriptors.add(SOLR_PARAM_FIELD_LIST);
         descriptors.add(SOLR_PARAM_SORT);
         descriptors.add(SOLR_PARAM_START);
         descriptors.add(SOLR_PARAM_ROWS);
+        descriptors.add(AMOUNT_DOCUMENTS_TO_RETURN);
         descriptors.add(JAAS_CLIENT_APP_NAME);
         descriptors.add(BASIC_USERNAME);
         descriptors.add(BASIC_PASSWORD);
@@ -330,11 +299,6 @@ public class QuerySolr extends SolrProcessor {
                     .subject("Record writer check")
                     .build());
         }
-
-        // sort
-
-        // fields
-
         return problems;
     }
 
@@ -342,146 +306,159 @@ public class QuerySolr extends SolrProcessor {
     public void onTrigger(final ProcessContext context, final ProcessSession session) throws ProcessException {
         final ComponentLog logger = getLogger();
 
-        FlowFile flowFileRequest = session.get();
-        boolean keepOriginal;
+        FlowFile flowFileOriginal = session.get();
+        FlowFile flowFileResponse;
 
-        if (flowFileRequest == null) {
+        if (flowFileOriginal == null) {
             if (context.hasNonLoopConnection()) {
                 return;
             }
-            flowFileRequest = session.create();
-            keepOriginal = false;
+            flowFileResponse = session.create();
         } else {
-            keepOriginal = true;
+            flowFileResponse = session.create(flowFileOriginal);
         }
 
         final SolrQuery solrQuery = new SolrQuery();
 
-        solrQuery.setQuery(context.getProperty(SOLR_PARAM_QUERY).evaluateAttributeExpressions(flowFileRequest).getValue());
-        solrQuery.setRequestHandler(context.getProperty(SOLR_PARAM_REQUEST_HANDLER).evaluateAttributeExpressions(flowFileRequest).getValue());
-
-        if (context.getProperty(SOLR_PARAM_FILTER_QUERY).isSet()) {
-            solrQuery.addFilterQuery(context.getProperty(SOLR_PARAM_FILTER_QUERY).evaluateAttributeExpressions(flowFileRequest).getValue());
-        }
-
-        // Splitting stuff should be done in validation
-        if (context.getProperty(SOLR_PARAM_FIELD_LIST).isSet()) {
-            for (final String field : context.getProperty(SOLR_PARAM_FIELD_LIST).evaluateAttributeExpressions(flowFileRequest).getValue()
-                    .split(",")) {
-                solrQuery.addField(field.trim());
-            }
-        }
-
-        // Splitting stuff should be done in validation
-        if (context.getProperty(SOLR_PARAM_SORT).isSet()) {
-            List<SolrQuery.SortClause> sortings = new ArrayList<>();
-            for (String sorting : context.getProperty(SOLR_PARAM_SORT).evaluateAttributeExpressions(flowFileRequest).getValue()
-                    .split(",")) {
-                // String[]
-            }
-
-            // solrQuery.setSorts();
-        }
-
-        if (context.getProperty(SOLR_PARAM_START).isSet()) {
-            solrQuery.setStart(Integer.parseInt(context.getProperty(SOLR_PARAM_START).evaluateAttributeExpressions(flowFileRequest).getValue()));
-        }
-
-        if (context.getProperty(SOLR_PARAM_ROWS).isSet()) {
-            solrQuery.setRows(Integer.parseInt(context.getProperty(SOLR_PARAM_ROWS).evaluateAttributeExpressions(flowFileRequest).getValue()));
-        }
-
-        final Map<String,String[]> additionalSolrParams = SolrUtils.getRequestParams(context, flowFileRequest);
-
-        // final Map<String,String[]> solrParams = SolrRequestParsers.parseQueryString(queryString).getMap();
-
-        for (Map.Entry<String,String[]> entry : additionalSolrParams.entrySet()) {
-            System.out.println(entry.getKey() + "=" + Arrays.asList(entry.getValue()));
-        }
-
-
-        final Set<String> searchComponents = extractSearchComponents(additionalSolrParams);
-        solrQuery.add(new MultiMapSolrParams(additionalSolrParams));
-        // check if params are overridden
-
-
-
-        final QueryRequest req = new QueryRequest(solrQuery);
-
-        if (isBasicAuthEnabled()) {
-            req.setBasicAuthCredentials(getUsername(), getPassword());
-        }
-
-        flowFileRequest = session.putAttribute(flowFileRequest, ATTRIBUTE_SOLR_CONNECT, getSolrLocation());
-        if (SOLR_TYPE_CLOUD.equals(context.getProperty(SOLR_TYPE).getValue())) {
-            flowFileRequest = session.putAttribute(flowFileRequest, ATTRIBUTE_SOLR_COLLECTION, context.getProperty(COLLECTION).evaluateAttributeExpressions().getValue());
-        }
-        flowFileRequest = session.putAttribute(flowFileRequest, ATTRIBUTE_SOLR_QUERY, solrQuery.toString());
-
-        FlowFile flowFileResponse;
-        if (!keepOriginal) {
-            flowFileResponse = flowFileRequest;
-            flowFileRequest = null;
-        } else {
-            flowFileResponse = session.create(flowFileRequest);
-        }
-
         try {
-            final QueryResponse response = req.process(getSolrClient());
+            solrQuery.setQuery(context.getProperty(SOLR_PARAM_QUERY).evaluateAttributeExpressions(flowFileResponse).getValue());
+            solrQuery.setRequestHandler(context.getProperty(SOLR_PARAM_REQUEST_HANDLER).evaluateAttributeExpressions(flowFileResponse).getValue());
 
-            Map<String,String> responseAttributes = new HashMap<>();
-            responseAttributes.put(ATTRIBUTE_CURSOR_MARK, response.getNextCursorMark());
-            responseAttributes.put(ATTRIBUTE_SOLR_STATUS, String.valueOf(response.getStatus()));
-            responseAttributes.put(ATTRIBUTE_QUERY_TIME, String.valueOf(response.getQTime()));
-            flowFileResponse = session.putAllAttributes(flowFileResponse, responseAttributes);
+            if (context.getProperty(SOLR_PARAM_FIELD_LIST).isSet()) {
+                for (final String field : context.getProperty(SOLR_PARAM_FIELD_LIST).evaluateAttributeExpressions(flowFileResponse).getValue()
+                        .split(",")) {
+                    solrQuery.addField(field.trim());
+                }
+            }
 
-            if (response.getResults().size() > 0) {
-                if (context.getProperty(RETURN_TYPE).getValue().equals(MODE_XML.getValue())){
-                    flowFileResponse = session.write(flowFileResponse, SolrUtils.getOutputStreamCallbackToTransformSolrResponseToXml(response));
-                    flowFileResponse = session.putAttribute(flowFileResponse, CoreAttributes.MIME_TYPE.key(), "application/xml");
+            // Avoid ArrayIndexOutOfBoundsException due to incorrectly configured sorting
+            try {
+                if (context.getProperty(SOLR_PARAM_SORT).isSet()) {
+                    final List<SolrQuery.SortClause> sortings = new ArrayList<>();
+                    for (final String sorting : context.getProperty(SOLR_PARAM_SORT).evaluateAttributeExpressions(flowFileResponse).getValue()
+                            .split(",")) {
+                        final String[] sortEntry = sorting.trim().split(" ");
+                        sortings.add(new SolrQuery.SortClause(sortEntry[0], sortEntry[1]));
+                    }
+                    solrQuery.setSorts(sortings);
+                }
+            } catch (Exception e) {
+                throw new ProcessException("Error while parsing the sort clauses for the Solr query");
+            }
+
+            final Integer startParam = context.getProperty(SOLR_PARAM_START).isSet() ? Integer.parseInt(context.getProperty(SOLR_PARAM_START).evaluateAttributeExpressions(flowFileResponse).getValue()) : CommonParams.START_DEFAULT;
+
+            solrQuery.setStart(startParam);
+
+            final Integer rowParam = context.getProperty(SOLR_PARAM_ROWS).isSet() ? Integer.parseInt(context.getProperty(SOLR_PARAM_ROWS).evaluateAttributeExpressions(flowFileResponse).getValue()) : CommonParams.ROWS_DEFAULT;
+
+            solrQuery.setRows(rowParam);
+
+            final Map<String,String[]> additionalSolrParams = SolrUtils.getRequestParams(context, flowFileResponse);
+
+            final Set<String> searchComponents = extractSearchComponents(additionalSolrParams);
+            solrQuery.add(new MultiMapSolrParams(additionalSolrParams));
+
+            final Map<String,String> attributes = new HashMap<>();
+            attributes.put(ATTRIBUTE_SOLR_CONNECT, getSolrLocation());
+            if (SOLR_TYPE_CLOUD.equals(context.getProperty(SOLR_TYPE).getValue())) {
+                attributes.put(ATTRIBUTE_SOLR_COLLECTION, context.getProperty(COLLECTION).evaluateAttributeExpressions(flowFileResponse).getValue());
+            }
+            attributes.put(ATTRIBUTE_SOLR_QUERY, solrQuery.toString());
+            if (flowFileOriginal != null) {
+                flowFileOriginal = session.putAllAttributes(flowFileOriginal, attributes);
+            }
+
+            flowFileResponse = session.putAllAttributes(flowFileResponse, attributes);
+
+            final boolean getEntireResults = RETURN_ALL_RESULTS.equals(context.getProperty(AMOUNT_DOCUMENTS_TO_RETURN).getValue());
+            boolean processFacetsAndStats = true;
+            boolean continuePaging = true;
+
+            while (continuePaging){
+                final QueryRequest req = new QueryRequest(solrQuery);
+                if (isBasicAuthEnabled()) {
+                    req.setBasicAuthCredentials(getUsername(), getPassword());
+                }
+
+                final QueryResponse response = req.process(getSolrClient());
+
+                final Long totalNumberOfResults = response.getResults().getNumFound();
+
+                Map<String,String> responseAttributes = new HashMap<>();
+                responseAttributes.put(ATTRIBUTE_SOLR_START, solrQuery.getStart().toString());
+                responseAttributes.put(ATTRIBUTE_SOLR_ROWS, solrQuery.getRows().toString());
+                responseAttributes.put(ATTRIBUTE_SOLR_NUMBER_RESULTS, totalNumberOfResults.toString());
+                responseAttributes.put(ATTRIBUTE_CURSOR_MARK, response.getNextCursorMark());
+                responseAttributes.put(ATTRIBUTE_SOLR_STATUS, String.valueOf(response.getStatus()));
+                responseAttributes.put(ATTRIBUTE_QUERY_TIME, String.valueOf(response.getQTime()));
+                flowFileResponse = session.putAllAttributes(flowFileResponse, responseAttributes);
+
+                if (response.getResults().size() > 0) {
+
+                    if (context.getProperty(RETURN_TYPE).getValue().equals(MODE_XML.getValue())){
+                        flowFileResponse = session.write(flowFileResponse, SolrUtils.getOutputStreamCallbackToTransformSolrResponseToXml(response));
+                        flowFileResponse = session.putAttribute(flowFileResponse, CoreAttributes.MIME_TYPE.key(), "application/xml");
+                    } else {
+                        final RecordSetWriterFactory writerFactory = context.getProperty(RECORD_WRITER).asControllerService(RecordSetWriterFactory.class);
+                        final RecordSchema schema = writerFactory.getSchema(flowFileResponse.getAttributes(), null);
+                        final RecordSet recordSet = SolrUtils.solrDocumentsToRecordSet(response.getResults(), schema);
+                        final StringBuffer mimeType = new StringBuffer();
+                        flowFileResponse = session.write(flowFileResponse, out -> {
+                            try (final RecordSetWriter writer = writerFactory.createWriter(getLogger(), schema, out)) {
+                                writer.write(recordSet);
+                                writer.flush();
+                                mimeType.append(writer.getMimeType());
+                            } catch (SchemaNotFoundException e) {
+                                throw new ProcessException("Could not parse Solr response", e);
+                            }
+                        });
+                        flowFileResponse = session.putAttribute(flowFileResponse, CoreAttributes.MIME_TYPE.key(), mimeType.toString());
+                    }
+
+                    if (processFacetsAndStats) {
+                        if (searchComponents.contains(FacetParams.FACET)) {
+                            FlowFile flowFileFacets = session.create(flowFileResponse);
+                            flowFileFacets = session.write(flowFileFacets, out -> {
+                                try (
+                                        final OutputStreamWriter osw = new OutputStreamWriter(out);
+                                        final JsonWriter writer = new JsonWriter(osw)
+                                ) {
+                                    addFacetsFromSolrResponseToJsonWriter(response, writer);
+                                }
+                            });
+                            flowFileFacets = session.putAttribute(flowFileFacets, CoreAttributes.MIME_TYPE.key(), MIME_TYPE_JSON);
+                            session.transfer(flowFileFacets, FACETS);
+                        }
+
+                        if (searchComponents.contains(StatsParams.STATS)) {
+                            FlowFile flowFileStats = session.create(flowFileResponse);
+                            flowFileStats = session.write(flowFileStats, out -> {
+                                try (
+                                        final OutputStreamWriter osw = new OutputStreamWriter(out);
+                                        final JsonWriter writer = new JsonWriter(osw)
+                                ) {
+                                    addStatsFromSolrResponseToJsonWriter(response, writer);
+                                }
+                            });
+                            flowFileStats = session.putAttribute(flowFileStats, CoreAttributes.MIME_TYPE.key(), MIME_TYPE_JSON);
+                            session.transfer(flowFileStats, STATS);
+                        }
+                        processFacetsAndStats = false;
+                    }
+                }
+
+                if (getEntireResults) {
+                    final Integer totalDocumentsReturned = solrQuery.getStart() + solrQuery.getRows();
+                    if (totalDocumentsReturned < totalNumberOfResults) {
+                        solrQuery.setStart(totalDocumentsReturned);
+                        session.transfer(flowFileResponse, RESULTS);
+                        flowFileResponse = session.create(flowFileResponse);
+                    } else {
+                        continuePaging = false;
+                    }
                 } else {
-                    final RecordSetWriterFactory writerFactory = context.getProperty(RECORD_WRITER).asControllerService(RecordSetWriterFactory.class);
-                    final RecordSchema schema = writerFactory.getSchema(flowFileResponse.getAttributes(), null);
-                    final RecordSet recordSet = SolrUtils.solrDocumentsToRecordSet(response.getResults(), schema);
-                    final StringBuffer mimeType = new StringBuffer();
-                    flowFileResponse = session.write(flowFileResponse, out -> {
-                        try (final RecordSetWriter writer = writerFactory.createWriter(getLogger(), schema, out)) {
-                            writer.write(recordSet);
-                            writer.flush();
-                            mimeType.append(writer.getMimeType());
-                        } catch (SchemaNotFoundException e) {
-                            throw new ProcessException("Could not parse Solr response", e);
-                        }
-                    });
-                    flowFileResponse = session.putAttribute(flowFileResponse, CoreAttributes.MIME_TYPE.key(), mimeType.toString());
-                }
-
-                if (searchComponents.contains(FacetParams.FACET)) {
-                    FlowFile flowFileFacets = session.create(flowFileResponse);
-                    flowFileFacets = session.write(flowFileFacets, out -> {
-                        try (
-                                final OutputStreamWriter osw = new OutputStreamWriter(out);
-                                final JsonWriter writer = new JsonWriter(osw)
-                        ) {
-                            addFacetsFromSolrResponseToJsonWriter(response, writer);
-                        }
-                    });
-                    flowFileFacets = session.putAttribute(flowFileFacets, CoreAttributes.MIME_TYPE.key(), MIME_TYPE_JSON);
-                    session.transfer(flowFileFacets, FACETS);
-                }
-
-                if (searchComponents.contains(StatsParams.STATS)) {
-                    FlowFile flowFileStats = session.create(flowFileResponse);
-                    flowFileStats = session.write(flowFileStats, out -> {
-                        try (
-                                final OutputStreamWriter osw = new OutputStreamWriter(out);
-                                final JsonWriter writer = new JsonWriter(osw)
-                        ) {
-                            addStatsFromSolrResponseToJsonWriter(response, writer);
-                        }
-                    });
-                    flowFileStats = session.putAttribute(flowFileStats, CoreAttributes.MIME_TYPE.key(), MIME_TYPE_JSON);
-                    session.transfer(flowFileStats, STATS);
+                    continuePaging = false;
                 }
             }
 
@@ -491,8 +468,8 @@ public class QuerySolr extends SolrProcessor {
             flowFileResponse = session.putAttribute(flowFileResponse, EXCEPTION_MESSAGE, e.getMessage());
             session.transfer(flowFileResponse, FAILURE);
             logger.error("Failed to execute query {} due to {}. FlowFile will be routed to relationship failure", new Object[]{solrQuery.toString(), e}, e);
-            if (flowFileRequest != null) {
-                flowFileRequest = session.penalize(flowFileRequest);
+            if (flowFileOriginal != null) {
+                flowFileOriginal = session.penalize(flowFileOriginal);
             }
         }
 
@@ -500,11 +477,11 @@ public class QuerySolr extends SolrProcessor {
             session.transfer(flowFileResponse, RESULTS);
         }
 
-        if (flowFileRequest != null) {
-            if (!flowFileRequest.isPenalized()) {
-                session.transfer(flowFileRequest, ORIGINAL);
+        if (flowFileOriginal != null) {
+            if (!flowFileOriginal.isPenalized()) {
+                session.transfer(flowFileOriginal, ORIGINAL);
             } else {
-                session.remove(flowFileRequest);
+                session.remove(flowFileOriginal);
             }
         }
     }
@@ -601,7 +578,6 @@ public class QuerySolr extends SolrProcessor {
         writer.endObject();
         writer.endObject();
     }
-
 }
 
 
