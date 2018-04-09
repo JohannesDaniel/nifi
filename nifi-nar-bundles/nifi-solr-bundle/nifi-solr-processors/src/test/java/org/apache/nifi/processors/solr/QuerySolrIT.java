@@ -28,11 +28,12 @@ import org.apache.nifi.util.MockFlowFile;
 import org.apache.nifi.util.TestRunner;
 import org.apache.nifi.util.TestRunners;
 import org.apache.solr.client.solrj.SolrClient;
+import org.apache.solr.client.solrj.SolrServerException;
 import org.apache.solr.client.solrj.impl.CloudSolrClient;
 import org.apache.solr.client.solrj.request.CollectionAdminRequest;
 import org.apache.solr.common.SolrInputDocument;
-import org.junit.After;
-import org.junit.Before;
+import org.junit.AfterClass;
+import org.junit.BeforeClass;
 import org.junit.Test;
 import org.xmlunit.matchers.CompareMatcher;
 
@@ -45,7 +46,9 @@ import java.nio.file.Paths;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.TimeZone;
 
 import static org.junit.Assert.assertEquals;
@@ -66,7 +69,6 @@ public class QuerySolrIT {
     private static String ZK_CONFIG_PATH;
     private static String ZK_CONFIG_NAME;
     private static String SOLR_LOCATION = "localhost:2181";
-    private CloudSolrClient solrClient;
 
     static {
         DATE_FORMAT.setTimeZone(TimeZone.getTimeZone("GMT"));
@@ -76,49 +78,55 @@ public class QuerySolrIT {
         ZK_CONFIG_NAME = "QuerySolrIT_config";
     }
 
-    @Before
-    public void setup() {
+    @BeforeClass
+    public static void setup() throws IOException, SolrServerException {
+        CloudSolrClient solrClient = createSolrClient();
+        Path currentDir = Paths.get(ZK_CONFIG_PATH);
+        solrClient.uploadConfig(currentDir, ZK_CONFIG_NAME);
+        solrClient.setDefaultCollection(SOLR_COLLECTION);
+
+        if (!solrClient.getZkStateReader().getClusterState().hasCollection(SOLR_COLLECTION)) {
+            CollectionAdminRequest.Create createCollection = CollectionAdminRequest.createCollection(SOLR_COLLECTION, ZK_CONFIG_NAME, 1, 1);
+            createCollection.process(solrClient);
+        } else {
+            solrClient.deleteByQuery("*:*");
+        }
+
+        for (int i = 0; i < 10; i++) {
+            SolrInputDocument doc = new SolrInputDocument();
+            doc.addField("id", "doc" + i);
+            Date date = new Date();
+            doc.addField("created", DATE_FORMAT.format(date));
+            doc.addField("string_single", "single" + i + ".1");
+            doc.addField("string_multi", "multi" + i + ".1");
+            doc.addField("string_multi", "multi" + i + ".2");
+            doc.addField("integer_single", i);
+            doc.addField("integer_multi", 1);
+            doc.addField("integer_multi", 2);
+            doc.addField("integer_multi", 3);
+            doc.addField("double_single", 0.5 + i);
+
+            solrClient.add(doc);
+        }
+        solrClient.commit();
+    }
+
+    public static CloudSolrClient createSolrClient() {
+        CloudSolrClient solrClient = null;
+
         try {
-
-
-
             solrClient = new CloudSolrClient.Builder().withZkHost(SOLR_LOCATION).build();
-            Path currentDir = Paths.get(ZK_CONFIG_PATH);
-            solrClient.uploadConfig(currentDir, ZK_CONFIG_NAME);
             solrClient.setDefaultCollection(SOLR_COLLECTION);
-
-            if (!solrClient.getZkStateReader().getClusterState().hasCollection(SOLR_COLLECTION)) {
-                CollectionAdminRequest.Create createCollection = CollectionAdminRequest.createCollection(SOLR_COLLECTION, ZK_CONFIG_NAME, 1, 1);
-                createCollection.process(solrClient);
-            } else {
-                solrClient.deleteByQuery("*:*");
-            }
-
-            for (int i = 0; i < 10; i++) {
-                SolrInputDocument doc = new SolrInputDocument();
-                doc.addField("id", "doc" + i);
-                Date date = new Date();
-                doc.addField("created", DATE_FORMAT.format(date));
-                doc.addField("string_single", "single" + i + ".1");
-                doc.addField("string_multi", "multi" + i + ".1");
-                doc.addField("string_multi", "multi" + i + ".2");
-                doc.addField("integer_single", i);
-                doc.addField("integer_multi", 1);
-                doc.addField("integer_multi", 2);
-                doc.addField("integer_multi", 3);
-                doc.addField("double_single", 0.5 + i);
-
-                solrClient.add(doc);
-            }
-            solrClient.commit();
         } catch (Exception e) {
             e.printStackTrace();
         }
+        return solrClient;
     }
 
-    @After
-    public void teardown() {
+    @AfterClass
+    public static void teardown() {
         try {
+            CloudSolrClient solrClient = createSolrClient();
             CollectionAdminRequest.Delete deleteCollection = CollectionAdminRequest.deleteCollection(SOLR_COLLECTION);
             deleteCollection.process(solrClient);
             solrClient.close();
@@ -126,7 +134,7 @@ public class QuerySolrIT {
         }
     }
 
-    private TestRunner createStandardRunner() {
+    private TestRunner createRunnerWithSolrClient(SolrClient solrClient) {
         final TestableProcessor proc = new TestableProcessor(solrClient);
 
         TestRunner runner = TestRunners.newTestRunner(proc);
@@ -139,61 +147,60 @@ public class QuerySolrIT {
 
     @Test
     public void testAllFacetCategories() throws IOException {
-        TestRunner runner = createStandardRunner();
-        /*runner.setProperty(QuerySolr.SOLR_QUERY_STRING, "q=*:*" +
-                "&facet=true&facet.interval=integer_single&facet.interval.set=[4,7]&facet.interval.set=[5,7]" +
-                "&facet.field=integer_multi&facet.query=integer_multi:2" +
-                "&facet.range=created&facet.range.start=NOW/MINUTE&facet.range.end=NOW/MINUTE%2B1MINUTE&facet.range.gap=%2B20SECOND" +
-                "&facet.query=*:*&facet.query=integer_multi:2&facet.query=integer_multi:3"
-        );*/
+        SolrClient solrClient = createSolrClient();
+        TestRunner runner = createRunnerWithSolrClient(solrClient);
 
-        runner.enqueue(new ByteArrayInputStream("test".getBytes()));
+        runner.setProperty("facet", "true");
+        runner.setProperty("facet.field", "integer_multi");
+        runner.setProperty("facet.interval", "integer_single");
+        runner.setProperty("facet.interval.set.1", "[4,7]");
+        runner.setProperty("facet.interval.set.2", "[5,7]");
+        runner.setProperty("facet.range", "created");
+        runner.setProperty("facet.range.start", "NOW/MINUTE");
+        runner.setProperty("facet.range.end", "NOW/MINUTE+1MINUTE");
+        runner.setProperty("facet.range.gap", "+20SECOND");
+        runner.setProperty("facet.query.1", "*:*");
+        runner.setProperty("facet.query.2", "integer_multi:2");
+        runner.setProperty("facet.query.3", "integer_multi:3");
+
+        runner.enqueue(new ByteArrayInputStream(new byte[0]));
         runner.run();
         runner.assertTransferCount(QuerySolr.FACETS, 1);
 
         JsonReader reader = new JsonReader(new InputStreamReader(new ByteArrayInputStream(
                 runner.getContentAsByteArray(runner.getFlowFilesForRelationship(QuerySolr.FACETS).get(0)))));
         reader.beginObject();
-
         while (reader.hasNext()) {
             String name = reader.nextName();
-
-            switch (name) {
-                case "facet_queries":
-                    assertEquals(returnCheckSumForArrayOfJsonObjects(reader), 30);
-                    break;
-                case "facet_fields":
-                    reader.beginObject();
-                    assertEquals(reader.nextName(), "integer_multi");
-                    assertEquals(returnCheckSumForArrayOfJsonObjects(reader), 30);
-                    reader.endObject();
-                    break;
-                case "facet_ranges":
-                    reader.beginObject();
-                    assertEquals(reader.nextName(), "created");
-                    assertEquals(returnCheckSumForArrayOfJsonObjects(reader), 10);
-                    reader.endObject();
-                    break;
-                case "facet_intervals":
-                    reader.beginObject();
-                    assertEquals(reader.nextName(), "integer_single");
-                    assertEquals(returnCheckSumForArrayOfJsonObjects(reader), 7);
-                    reader.endObject();
-                    break;
+            if (name.equals("facet_queries")) {
+                assertEquals(30, returnCheckSumForArrayOfJsonObjects(reader));
+            } else if (name.equals("facet_fields")) {
+                reader.beginObject();
+                assertEquals(reader.nextName(), "integer_multi");
+                assertEquals(returnCheckSumForArrayOfJsonObjects(reader), 30);
+                reader.endObject();
+            } else if (name.equals("facet_ranges")) {
+                reader.beginObject();
+                assertEquals(reader.nextName(), "created");
+                assertEquals(returnCheckSumForArrayOfJsonObjects(reader), 10);
+                reader.endObject();
+            } else if (name.equals("facet_intervals")) {
+                reader.beginObject();
+                assertEquals(reader.nextName(), "integer_single");
+                assertEquals(returnCheckSumForArrayOfJsonObjects(reader), 7);
+                reader.endObject();
             }
         }
-
         reader.endObject();
         reader.close();
+        solrClient.close();
     }
 
     private int returnCheckSumForArrayOfJsonObjects(JsonReader reader) throws IOException {
         int checkSum = 0;
         reader.beginArray();
-
         while (reader.hasNext()) {
             reader.beginObject();
-
             while (reader.hasNext()) {
                 if (reader.nextName().equals("count")) {
                     checkSum += reader.nextInt();
@@ -209,9 +216,13 @@ public class QuerySolrIT {
 
     @Test
     public void testFacetTrueButNull() throws IOException {
-        TestRunner runner = createStandardRunner();
-        //runner.setProperty(QuerySolr.SOLR_QUERY_STRING, "q=*:*&facet=true&stats=true");
-        runner.enqueue(new ByteArrayInputStream("test".getBytes()));
+        SolrClient solrClient = createSolrClient();
+        TestRunner runner = createRunnerWithSolrClient(solrClient);
+
+        runner.setProperty("facet", "true");
+        runner.setProperty("stats", "true");
+
+        runner.enqueue(new ByteArrayInputStream(new byte[0]));
         runner.run();
 
         runner.assertTransferCount(QuerySolr.RESULTS, 1);
@@ -222,7 +233,6 @@ public class QuerySolrIT {
         JsonReader reader = new JsonReader(new InputStreamReader(new ByteArrayInputStream(
                 runner.getContentAsByteArray(runner.getFlowFilesForRelationship(QuerySolr.FACETS).get(0)))));
         reader.beginObject();
-
         while (reader.hasNext()) {
             if (reader.nextName().equals("facet_queries")) {
                 reader.beginArray();
@@ -247,13 +257,18 @@ public class QuerySolrIT {
 
         reader.close();
         reader_stats.close();
+        solrClient.close();
     }
 
     @Test
     public void testStats() throws IOException {
-        TestRunner runner = createStandardRunner();
-        //runner.setProperty(QuerySolr.SOLR_QUERY_STRING, "q=*:*&stats=true&stats.field=integer_single");
-        runner.enqueue(new ByteArrayInputStream("test".getBytes()));
+        SolrClient solrClient = createSolrClient();
+        TestRunner runner = createRunnerWithSolrClient(solrClient);
+
+        runner.setProperty("stats", "true");
+        runner.setProperty("stats.field", "integer_single");
+
+        runner.enqueue(new ByteArrayInputStream(new byte[0]));
         runner.run();
 
         runner.assertTransferCount(QuerySolr.STATS, 1);
@@ -264,7 +279,6 @@ public class QuerySolrIT {
         reader.beginObject();
         assertEquals(reader.nextName(), "integer_single");
         reader.beginObject();
-
         while (reader.hasNext()) {
             String name = reader.nextName();
             switch (name) {
@@ -275,17 +289,21 @@ public class QuerySolrIT {
                 default: reader.skipValue(); break;
             }
         }
+        reader.endObject();
+        reader.endObject();
+        reader.endObject();
 
-        reader.endObject();
-        reader.endObject();
-        reader.endObject();
         reader.close();
+        solrClient.close();
     }
 
     @Test
-    public void testRelationshipRoutings() {
-        TestRunner runner = createStandardRunner();
-        //runner.setProperty(QuerySolr.SOLR_QUERY_STRING, "q=*:*&facet=true&stats=true");
+    public void testRelationshipRoutings() throws IOException {
+        SolrClient solrClient = createSolrClient();
+        TestRunner runner = createRunnerWithSolrClient(solrClient);
+
+        runner.setProperty("facet", "true");
+        runner.setProperty("stats", "true");
 
         // Set request handler for request failure
         runner.setProperty(QuerySolr.SOLR_PARAM_REQUEST_HANDLER, "/nonexistentrequesthandler");
@@ -302,7 +320,7 @@ public class QuerySolrIT {
 
         // Processor has an input connection and fails
         runner.setNonLoopConnection(true);
-        runner.enqueue("");
+        runner.enqueue(new byte[0]);
         runner.run(1, false);
         runner.assertAllFlowFilesTransferred(QuerySolr.FAILURE, 1);
 
@@ -330,7 +348,7 @@ public class QuerySolrIT {
 
         // Processor has an input connection and succeeds
         runner.setNonLoopConnection(true);
-        runner.enqueue("");
+        runner.enqueue(new byte[0]);
         runner.run(1, true);
         runner.assertTransferCount(QuerySolr.RESULTS, 1);
         runner.assertTransferCount(QuerySolr.FACETS, 1);
@@ -343,60 +361,231 @@ public class QuerySolrIT {
         flowFile.assertAttributeExists(QuerySolr.ATTRIBUTE_SOLR_STATUS);
         flowFile.assertAttributeExists(QuerySolr.ATTRIBUTE_CURSOR_MARK);
         flowFile.assertAttributeExists(QuerySolr.ATTRIBUTE_QUERY_TIME);
-
         flowFile = runner.getFlowFilesForRelationship(QuerySolr.FACETS).get(0);
         flowFile.assertAttributeExists(QuerySolr.ATTRIBUTE_SOLR_CONNECT);
         flowFile.assertAttributeExists(QuerySolr.ATTRIBUTE_SOLR_STATUS);
         flowFile.assertAttributeExists(QuerySolr.ATTRIBUTE_CURSOR_MARK);
         flowFile.assertAttributeExists(QuerySolr.ATTRIBUTE_QUERY_TIME);
-
         flowFile = runner.getFlowFilesForRelationship(QuerySolr.STATS).get(0);
         flowFile.assertAttributeExists(QuerySolr.ATTRIBUTE_SOLR_CONNECT);
         flowFile.assertAttributeExists(QuerySolr.ATTRIBUTE_SOLR_STATUS);
         flowFile.assertAttributeExists(QuerySolr.ATTRIBUTE_CURSOR_MARK);
         flowFile.assertAttributeExists(QuerySolr.ATTRIBUTE_QUERY_TIME);
         runner.clearTransferState();
+
+        solrClient.close();
     }
 
     @Test
-    public void testExpressionLanguage() {
-        TestRunner runner = createStandardRunner();
-        //runner.setProperty(QuerySolr.SOLR_QUERY_STRING, "${query}");
+    public void testExpressionLanguageForProperties() throws IOException {
+        SolrClient solrClient = createSolrClient();
+        TestRunner runner = createRunnerWithSolrClient(solrClient);
+
+        runner.setProperty(SolrUtils.SOLR_TYPE, SolrUtils.SOLR_TYPE_CLOUD.getValue());
+        runner.setProperty(QuerySolr.SOLR_PARAM_QUERY, "${query}");
+        runner.setProperty(QuerySolr.SOLR_PARAM_REQUEST_HANDLER, "${handler}");
+        runner.setProperty(QuerySolr.SOLR_PARAM_FIELD_LIST, "${fields}");
+        runner.setProperty(QuerySolr.SOLR_PARAM_SORT, "${sort}");
+        runner.setProperty(QuerySolr.SOLR_PARAM_START, "${start}");
+        runner.setProperty(QuerySolr.SOLR_PARAM_ROWS, "${rows}");
 
         runner.enqueue(new byte[0], new HashMap<String,String>(){{
-            put("query", "q=id:doc0&fl=id");
+            put("query", "id:(doc0 OR doc1 OR doc2 OR doc3)");
+            put("handler", "/select");
+            put("fields", "id");
+            put("sort", "id desc");
+            put("start", "1");
+            put("rows", "2");
         }});
         runner.run();
         runner.assertTransferCount(QuerySolr.RESULTS, 1);
 
-        String expectedXml = "<docs><doc boost=\"1.0\"><field name=\"id\">doc0</field></doc></docs>";
+        String expectedXml = "<docs><doc boost=\"1.0\"><field name=\"id\">doc2</field></doc><doc boost=\"1.0\"><field name=\"id\">doc1</field></doc></docs>";
         assertThat(expectedXml, CompareMatcher.isIdenticalTo(new String(runner.getContentAsByteArray(runner.getFlowFilesForRelationship(QuerySolr.RESULTS).get(0)))));
+
+        solrClient.close();
     }
 
     @Test
-    public void testStandardResponse() {
-        TestRunner runner = createStandardRunner();
-        //runner.setProperty(QuerySolr.SOLR_QUERY_STRING, "q=id:(doc0 OR doc1)&fl=id&sort=id desc");
+    public void testSingleFilterQuery() throws IOException {
+        SolrClient solrClient = createSolrClient();
+        TestRunner runner = createRunnerWithSolrClient(solrClient);
+        runner.setProperty(QuerySolr.SOLR_PARAM_SORT, "id asc");
+        runner.setProperty(QuerySolr.SOLR_PARAM_FIELD_LIST, "id");
+
+        runner.setProperty("fq", "id:(doc2 OR doc3)");
+
+        runner.enqueue(new byte[0]);
+        runner.run();
+        runner.assertTransferCount(QuerySolr.RESULTS, 1);
+
+        String expectedXml = "<docs><doc boost=\"1.0\"><field name=\"id\">doc2</field></doc><doc boost=\"1.0\"><field name=\"id\">doc3</field></doc></docs>";
+        assertThat(expectedXml, CompareMatcher.isIdenticalTo(new String(runner.getContentAsByteArray(runner.getFlowFilesForRelationship(QuerySolr.RESULTS).get(0)))));
+
+        solrClient.close();
+    }
+
+
+    @Test
+    public void testMultipleFilterQueries() throws IOException {
+        SolrClient solrClient = createSolrClient();
+        TestRunner runner = createRunnerWithSolrClient(solrClient);
+        runner.setProperty(QuerySolr.SOLR_PARAM_SORT, "id asc");
+        runner.setProperty(QuerySolr.SOLR_PARAM_FIELD_LIST, "id");
+
+        runner.setProperty("fq.1", "id:(doc0 OR doc1 OR doc2 OR doc3)");
+        runner.setProperty("fq.2", "id:(doc1 OR doc2 OR doc3 OR doc4)");
+        runner.setProperty("fq.3", "id:(doc2 OR doc3 OR doc4 OR doc5)");
+
+        runner.enqueue(new byte[0]);
+        runner.run();
+        runner.assertTransferCount(QuerySolr.RESULTS, 1);
+
+        String expectedXml = "<docs><doc boost=\"1.0\"><field name=\"id\">doc2</field></doc><doc boost=\"1.0\"><field name=\"id\">doc3</field></doc></docs>";
+        assertThat(expectedXml, CompareMatcher.isIdenticalTo(new String(runner.getContentAsByteArray(runner.getFlowFilesForRelationship(QuerySolr.RESULTS).get(0)))));
+
+        solrClient.close();
+    }
+
+    @Test
+    public void testStandardResponse() throws IOException {
+        SolrClient solrClient = createSolrClient();
+        TestRunner runner = createRunnerWithSolrClient(solrClient);
+
+        runner.setProperty(QuerySolr.SOLR_PARAM_QUERY, "id:(doc0 OR doc1)");
+        runner.setProperty(QuerySolr.SOLR_PARAM_FIELD_LIST, "id");
+        runner.setProperty(QuerySolr.SOLR_PARAM_SORT, "id desc");
 
         runner.setNonLoopConnection(false);
         runner.run();
-        runner.assertTransferCount(QuerySolr.RESULTS, 1);
+        runner.assertAllFlowFilesTransferred(QuerySolr.RESULTS, 1);
 
         MockFlowFile flowFile = runner.getFlowFilesForRelationship(QuerySolr.RESULTS).get(0);
         flowFile.assertAttributeExists(QuerySolr.ATTRIBUTE_CURSOR_MARK);
         flowFile.assertAttributeExists(QuerySolr.ATTRIBUTE_SOLR_STATUS);
         flowFile.assertAttributeExists(QuerySolr.ATTRIBUTE_QUERY_TIME);
-        flowFile.assertAttributeExists(QuerySolr.ATTRIBUTE_SOLR_COLLECTION);
 
         String expectedXml = "<docs><doc boost=\"1.0\"><field name=\"id\">doc1</field></doc><doc boost=\"1.0\"><field name=\"id\">doc0</field></doc></docs>";
-        assertThat(expectedXml, CompareMatcher.isIdenticalTo(new String(runner.getContentAsByteArray(runner.getFlowFilesForRelationship(QuerySolr.RESULTS).get(0)))));
+        assertThat(expectedXml, CompareMatcher.isIdenticalTo(new String(runner.getContentAsByteArray(flowFile))));
+
+        solrClient.close();
     }
 
     @Test
+    public void testPreserveOriginalContent() throws IOException {
+        SolrClient solrClient = createSolrClient();
+        TestRunner runner = createRunnerWithSolrClient(solrClient);
+
+        runner.setProperty(QuerySolr.SOLR_PARAM_QUERY, "id:doc0");
+        runner.setProperty(QuerySolr.SOLR_PARAM_FIELD_LIST, "id");
+
+        String content = "test content 123";
+
+        runner.enqueue(content);
+        runner.run();
+        runner.assertTransferCount(QuerySolr.RESULTS, 1);
+        runner.assertTransferCount(QuerySolr.ORIGINAL, 1);
+
+        String expectedXml = "<docs><doc boost=\"1.0\"><field name=\"id\">doc0</field></doc></docs>";
+        assertThat(expectedXml, CompareMatcher.isIdenticalTo(new String(runner.getContentAsByteArray(runner.getFlowFilesForRelationship(QuerySolr.RESULTS).get(0)))));
+        assertEquals(content, new String(runner.getContentAsByteArray(runner.getFlowFilesForRelationship(QuerySolr.ORIGINAL).get(0))));
+
+        solrClient.close();
+    }
+
+    @Test
+    public void testRetrievalOfFullResults() throws IOException {
+        SolrClient solrClient = createSolrClient();
+        TestRunner runner = createRunnerWithSolrClient(solrClient);
+
+        runner.setProperty(QuerySolr.SOLR_PARAM_FIELD_LIST, "id");
+        runner.setProperty(QuerySolr.SOLR_PARAM_SORT, "id asc");
+        runner.setProperty(QuerySolr.SOLR_PARAM_ROWS, "2");
+        runner.setProperty(QuerySolr.AMOUNT_DOCUMENTS_TO_RETURN, QuerySolr.RETURN_ALL_RESULTS);
+
+        runner.enqueue(new byte[0]);
+        runner.run();
+        runner.assertTransferCount(QuerySolr.RESULTS, 5);
+        runner.assertTransferCount(QuerySolr.ORIGINAL, 1);
+        runner.assertTransferCount(QuerySolr.STATS, 0);
+        runner.assertTransferCount(QuerySolr.FACETS, 0);
+
+        List<MockFlowFile> flowFiles = runner.getFlowFilesForRelationship(QuerySolr.RESULTS);
+        Integer documentCounter = 0;
+        Integer startParam = 0;
+
+        for (MockFlowFile flowFile : flowFiles) {
+            Map<String,String> attributes = flowFile.getAttributes();
+            assertEquals(attributes.get(QuerySolr.ATTRIBUTE_SOLR_START), startParam.toString());
+            startParam += 2;
+
+            StringBuffer expectedXml = new StringBuffer()
+                    .append("<docs><doc boost=\"1.0\"><field name=\"id\">doc")
+                    .append(documentCounter++)
+                    .append("</field></doc><doc boost=\"1.0\"><field name=\"id\">doc")
+                    .append(documentCounter++)
+                    .append("</field></doc></docs>");
+            assertThat(expectedXml.toString(), CompareMatcher.isIdenticalTo(new String(runner.getContentAsByteArray(flowFile))));
+        }
+
+        solrClient.close();
+    }
+
+    @Test
+    public void testRetrievalOfFullResults2() throws IOException {
+        SolrClient solrClient = createSolrClient();
+        TestRunner runner = createRunnerWithSolrClient(solrClient);
+
+        runner.setProperty(QuerySolr.SOLR_PARAM_FIELD_LIST, "id");
+        runner.setProperty(QuerySolr.SOLR_PARAM_SORT, "id asc");
+        runner.setProperty(QuerySolr.SOLR_PARAM_ROWS, "3");
+        runner.setProperty(QuerySolr.AMOUNT_DOCUMENTS_TO_RETURN, QuerySolr.RETURN_ALL_RESULTS);
+        runner.setProperty("facet", "true");
+        runner.setProperty("stats", "true");
+
+        runner.enqueue(new byte[0]);
+        runner.run();
+
+        runner.assertTransferCount(QuerySolr.RESULTS, 4);
+        runner.assertTransferCount(QuerySolr.ORIGINAL, 1);
+        runner.assertTransferCount(QuerySolr.FACETS, 1);
+        runner.assertTransferCount(QuerySolr.STATS, 1);
+
+        solrClient.close();
+    }
+
+    @Test
+    public void testRetrievalOfFullResults3() throws IOException {
+        SolrClient solrClient = createSolrClient();
+        TestRunner runner = createRunnerWithSolrClient(solrClient);
+
+        runner.setProperty(QuerySolr.SOLR_PARAM_FIELD_LIST, "id");
+        runner.setProperty(QuerySolr.SOLR_PARAM_SORT, "id asc");
+        runner.setProperty(QuerySolr.SOLR_PARAM_ROWS, "3");
+        runner.setProperty(QuerySolr.AMOUNT_DOCUMENTS_TO_RETURN, QuerySolr.RETURN_ALL_RESULTS);
+        runner.setProperty("facet", "true");
+        runner.setProperty("stats", "true");
+
+        runner.setNonLoopConnection(false);
+        runner.run();
+
+        runner.assertTransferCount(QuerySolr.RESULTS, 4);
+        runner.assertTransferCount(QuerySolr.ORIGINAL, 0);
+        runner.assertTransferCount(QuerySolr.FACETS, 1);
+        runner.assertTransferCount(QuerySolr.STATS, 1);
+
+        solrClient.close();
+    }
+
+
+    @Test
     public void testRecordResponse() throws IOException, InitializationException {
-        TestRunner runner = createStandardRunner();
+        SolrClient solrClient = createSolrClient();
+        TestRunner runner = createRunnerWithSolrClient(solrClient);
+
         runner.setProperty(QuerySolr.RETURN_TYPE, QuerySolr.MODE_REC.getValue());
-        //runner.setProperty(QuerySolr.SOLR_QUERY_STRING, "q=*:*&fl=id,created,integer_single&rows=10");
+        runner.setProperty(QuerySolr.SOLR_PARAM_FIELD_LIST, "id,created,integer_single");
+        runner.setProperty(QuerySolr.SOLR_PARAM_ROWS, "10");
 
         final String outputSchemaText = new String(Files.readAllBytes(Paths.get("src/test/resources/test-schema.avsc")));
 
@@ -431,6 +620,8 @@ public class QuerySolrIT {
             reader.endObject();
         }
         reader.close();
+        solrClient.close();
+
         assertEquals(controlScore, 45);
     }
 

@@ -191,9 +191,7 @@ public class SolrUtils {
             .defaultValue("10 seconds")
             .build();
 
-    // will not match all possible field names
     public static final String REPEATING_PARAM_PATTERN = "[\\w\\.]+\\.\\d+$";
-
 
     public static SolrClient createSolrClient(final PropertyContext context, final String solrLocation) {
         final Integer socketTimeout = context.getProperty(SOLR_SOCKET_TIMEOUT).asTimePeriod(TimeUnit.MILLISECONDS).intValue();
@@ -239,8 +237,6 @@ public class SolrUtils {
         }
     }
 
-
-
     /**
      * Writes each SolrDocument to a record.
      */
@@ -263,7 +259,6 @@ public class SolrUtils {
         }
         return new ListRecordSet(schema, lr);
     }
-
 
     public static OutputStreamCallback getOutputStreamCallbackToTransformSolrResponseToXml(QueryResponse response) {
         return new QueryResponseOutputStreamCallback(response);
@@ -329,7 +324,4 @@ public class SolrUtils {
 
         return paramsMap;
     }
-
-
-
 }
