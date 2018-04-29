@@ -26,6 +26,9 @@ public class XMLRecordSetWriter extends DateTimeTextRecordSetWriter implements R
     // suppress nulls
     // pretty print
 
+    // option how to treat arrays
+    // option to define name of root?
+
     @Override
     protected List<PropertyDescriptor> getSupportedPropertyDescriptors() {
         final List<PropertyDescriptor> properties = new ArrayList<>(super.getSupportedPropertyDescriptors());
