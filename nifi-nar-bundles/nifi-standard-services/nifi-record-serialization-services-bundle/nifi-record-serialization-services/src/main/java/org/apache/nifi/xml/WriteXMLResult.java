@@ -1,6 +1,7 @@
 package org.apache.nifi.xml;
 
 import com.sun.xml.internal.txw2.output.IndentingXMLStreamWriter;
+import org.apache.nifi.NullSuppression;
 import org.apache.nifi.logging.ComponentLog;
 import org.apache.nifi.schema.access.SchemaAccessWriter;
 import org.apache.nifi.serialization.AbstractRecordSetWriter;
@@ -10,8 +11,11 @@ import org.apache.nifi.serialization.record.DataType;
 import org.apache.nifi.serialization.record.RawRecordWriter;
 import org.apache.nifi.serialization.record.Record;
 import org.apache.nifi.serialization.record.RecordField;
+import org.apache.nifi.serialization.record.RecordFieldType;
 import org.apache.nifi.serialization.record.RecordSchema;
 import org.apache.nifi.serialization.record.type.ArrayDataType;
+import org.apache.nifi.serialization.record.type.ChoiceDataType;
+import org.apache.nifi.serialization.record.type.MapDataType;
 import org.apache.nifi.serialization.record.type.RecordDataType;
 import org.apache.nifi.serialization.record.util.DataTypeUtils;
 
@@ -22,7 +26,6 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.text.DateFormat;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -38,14 +41,16 @@ public class WriteXMLResult extends AbstractRecordSetWriter implements RecordSet
     final XMLStreamWriter writer;
     final NullSuppression nullSuppression;
     final ArrayWrapping arrayWrapping;
-    final String arrayWrappingValue;
+    final String arrayTagName;
+    final String recordName;
+    final String rootTagName;
 
     private final Supplier<DateFormat> LAZY_DATE_FORMAT;
     private final Supplier<DateFormat> LAZY_TIME_FORMAT;
     private final Supplier<DateFormat> LAZY_TIMESTAMP_FORMAT;
 
     public WriteXMLResult(final ComponentLog logger, final RecordSchema recordSchema, final SchemaAccessWriter schemaAccess, final OutputStream out, final boolean prettyPrint,
-                          final NullSuppression nullSuppression, final ArrayWrapping arrayWrapping, final String arrayWrappingValue,
+                          final NullSuppression nullSuppression, final ArrayWrapping arrayWrapping, final String arrayTagName, final String rootTagName,
                           final String dateFormat, final String timeFormat, final String timestampFormat) throws IOException {
 
         super(out);
@@ -54,8 +59,18 @@ public class WriteXMLResult extends AbstractRecordSetWriter implements RecordSet
         this.recordSchema = recordSchema;
         this.schemaAccess = schemaAccess;
         this.nullSuppression = nullSuppression;
+
         this.arrayWrapping = arrayWrapping;
-        this.arrayWrappingValue = arrayWrappingValue;
+        this.arrayTagName = arrayTagName;
+
+        this.rootTagName = rootTagName;
+
+        final Optional<String> recordNameOptional = recordSchema.getIdentifier().getName();
+        if (recordNameOptional.isPresent()) {
+            recordName = recordNameOptional.get();
+        } else {
+            throw new IOException("Could not retrieve name for record in schema");
+        }
 
         final DateFormat df = dateFormat == null ? null : DataTypeUtils.getDateFormat(dateFormat);
         final DateFormat tf = timeFormat == null ? null : DataTypeUtils.getDateFormat(timeFormat);
@@ -69,23 +84,16 @@ public class WriteXMLResult extends AbstractRecordSetWriter implements RecordSet
             XMLOutputFactory factory = XMLOutputFactory.newInstance();
 
             // should I consider the encoding somehow (e. g. via property)?
-            // writer = factory.createXMLStreamWriter(out, StandardCharsets.UTF_8.name());
-
+            // e. g. writer = factory.createXMLStreamWriter(out, StandardCharsets.UTF_8.name());
             if (prettyPrint) {
                 writer = new IndentingXMLStreamWriter(factory.createXMLStreamWriter(out));
             } else {
                 writer = factory.createXMLStreamWriter(out);
             }
 
-            /*
-            XMLOutputFactory xmlof = XMLOutputFactory.newInstance();
-            XMLStreamWriter writer = new IndentingXMLStreamWriter(xmlof.createXMLStreamWriter(out));
-             */
-
         } catch (XMLStreamException e) {
             throw new IOException(e.getMessage());
         }
-
     }
 
     @Override
@@ -97,7 +105,7 @@ public class WriteXMLResult extends AbstractRecordSetWriter implements RecordSet
         try {
             writer.writeStartDocument();
 
-            writer.writeStartElement("ROOT");
+            writer.writeStartElement(rootTagName);
 
         } catch (XMLStreamException e) {
             throw new IOException(e.getMessage());
@@ -144,23 +152,16 @@ public class WriteXMLResult extends AbstractRecordSetWriter implements RecordSet
     protected Map<String, String> writeRecord(Record record) throws IOException {
 
         if (!isActiveRecordSet()) {
-            // flush of writer ??
             schemaAccess.writeHeader(recordSchema, getOutputStream());
         }
-        // coerce == true
         System.out.println(record);
 
         List<String> tagsToOpen = new ArrayList<>();
 
         try {
-            Optional<String> recordNameOptional = recordSchema.getIdentifier().getName();
-            if (recordNameOptional.isPresent()) {
-                tagsToOpen.add(recordNameOptional.get());
-            } else {
-                throw new IOException("No name for record schema available");
-            }
+            tagsToOpen.add(recordName);
 
-            boolean closingTagRequired = writeRecordUsingSchema(tagsToOpen, record, recordSchema);
+            boolean closingTagRequired = iterateThroughRecordUsingSchema(tagsToOpen, record, recordSchema);
             if (closingTagRequired) {
                 writer.writeEndElement();
             }
@@ -171,46 +172,37 @@ public class WriteXMLResult extends AbstractRecordSetWriter implements RecordSet
         return schemaAccess.getAttributes(recordSchema);
     }
 
-    private boolean writeRecordUsingSchema(List<String> tagsToOpen, Record record, RecordSchema schema) throws XMLStreamException {
+    private boolean iterateThroughRecordUsingSchema(List<String> tagsToOpen, Record record, RecordSchema schema) throws XMLStreamException {
 
-        // "global"
-        boolean requireGlobalEndTag = false;
+        boolean loopHasWritten = false;
         for (RecordField field : schema.getFields()) {
 
             String fieldName = field.getFieldName();
             DataType dataType = field.getDataType();
             Object value = record.getValue(field);
 
-            boolean requireEndTag = false;
-
-            final Object coercedValue = DataTypeUtils.convertType(value, dataType, LAZY_DATE_FORMAT, LAZY_TIME_FORMAT, LAZY_TIMESTAMP_FORMAT, fieldName);
+            final DataType chosenDataType = dataType.getFieldType() == RecordFieldType.CHOICE ? DataTypeUtils.chooseDataType(value, (ChoiceDataType) dataType) : dataType;
+            final Object coercedValue = DataTypeUtils.convertType(value, chosenDataType, LAZY_DATE_FORMAT, LAZY_TIME_FORMAT, LAZY_TIMESTAMP_FORMAT, fieldName);
 
             if (coercedValue != null) {
-                tagsToOpen.add(fieldName);
-                requireEndTag = writeField(tagsToOpen, coercedValue, dataType, schema);
-
-                if (!requireEndTag) {
-                    tagsToOpen.remove(tagsToOpen.size() - 1);
+                boolean hasWritten = writeFieldForType(tagsToOpen, coercedValue, chosenDataType, fieldName);
+                if (hasWritten) {
+                    loopHasWritten = true;
                 }
 
             } else {
                 if (nullSuppression.equals(NullSuppression.NEVER_SUPPRESS) || nullSuppression.equals(NullSuppression.SUPPRESS_MISSING) && recordHasField(field, record)) {
-                    tagsToOpen.add(fieldName);
-                    writeAllTags(tagsToOpen);
-                    requireEndTag = true;
+                    writeAllTags(tagsToOpen, fieldName);
+                    writer.writeEndElement();
+                    loopHasWritten = true;
                 }
-            }
-
-            if (requireEndTag) {
-                requireGlobalEndTag = true;
-                writer.writeEndElement();
             }
         }
 
-        return requireGlobalEndTag;
+        return loopHasWritten;
     }
 
-    private boolean writeField(List<String> tagsToOpen, Object coercedValue, DataType dataType, RecordSchema schema) throws XMLStreamException {
+    private boolean writeFieldForType(List<String> tagsToOpen, Object coercedValue, DataType dataType, String fieldName) throws XMLStreamException {
         switch (dataType.getFieldType()) {
             case BOOLEAN:
             case BYTE:
@@ -221,66 +213,177 @@ public class WriteXMLResult extends AbstractRecordSetWriter implements RecordSet
             case LONG:
             case SHORT:
             case STRING: {
-                writeAllTags(tagsToOpen);
+                writeAllTags(tagsToOpen, fieldName);
                 writer.writeCharacters(coercedValue.toString());
+                writer.writeEndElement();
                 return true;
             }
             case DATE: {
-                writeAllTags(tagsToOpen);
+                writeAllTags(tagsToOpen, fieldName);
                 final String stringValue = DataTypeUtils.toString(coercedValue, LAZY_DATE_FORMAT);
                 writer.writeCharacters(stringValue);
+                writer.writeEndElement();
                 return true;
             }
             case TIME: {
-                writeAllTags(tagsToOpen);
+                writeAllTags(tagsToOpen, fieldName);
                 final String stringValue = DataTypeUtils.toString(coercedValue, LAZY_TIME_FORMAT);
                 writer.writeCharacters(stringValue);
+                writer.writeEndElement();
                 return true;
             }
             case TIMESTAMP: {
-                writeAllTags(tagsToOpen);
+                writeAllTags(tagsToOpen, fieldName);
                 final String stringValue = DataTypeUtils.toString(coercedValue, LAZY_TIMESTAMP_FORMAT);
                 writer.writeCharacters(stringValue);
+                writer.writeEndElement();
                 return true;
             }
             case RECORD: {
                 final Record record = (Record) coercedValue;
                 final RecordDataType recordDataType = (RecordDataType) dataType;
                 final RecordSchema childSchema = recordDataType.getChildSchema();
-                return writeRecordUsingSchema(tagsToOpen, record, childSchema);
-            }
-            case ARRAY: {
-                if (arrayWrapping.equals(ArrayWrapping.NO_WRAPPING)) {
-                    if (coercedValue instanceof Object[]) {
-                        final Object[] arrayValues = (Object[]) coercedValue;
-                        final ArrayDataType arrayDataType = (ArrayDataType) dataType;
-                        final DataType elementType = arrayDataType.getElementType();
-                        //writeArray(values, fieldName, generator, elementType);
+                tagsToOpen.add(fieldName);
+
+                boolean hasWritten = iterateThroughRecordUsingSchema(tagsToOpen, record, childSchema);
+
+                if (hasWritten) {
+                    writer.writeEndElement();
+                    return true;
+                } else {
+
+                    if (nullSuppression.equals(NullSuppression.NEVER_SUPPRESS) || nullSuppression.equals(NullSuppression.SUPPRESS_MISSING)) {
+                        writeAllTags(tagsToOpen);
+                        writer.writeEndElement();
+                        return true;
                     } else {
-                       // generator.writeString(coercedValue.toString());
+                        tagsToOpen.remove(tagsToOpen.size() - 1);
+                        return false;
                     }
                 }
             }
-
-            // choice
-            // map
-            // array
-
-        }
-
-
-        /*
-        case DATE: {
-                final String stringValue = DataTypeUtils.toString(coercedValue, LAZY_DATE_FORMAT);
-                if (DataTypeUtils.isLongTypeCompatible(stringValue)) {
-                    generator.writeNumber(DataTypeUtils.toLong(coercedValue, fieldName));
+            case ARRAY: {
+                final Object[] arrayValues;
+                if (coercedValue instanceof Object[]) {
+                    arrayValues = (Object[]) coercedValue;
                 } else {
-                    generator.writeString(stringValue);
+                    arrayValues = new Object[]{coercedValue.toString()};
                 }
-                break;
+
+                final ArrayDataType arrayDataType = (ArrayDataType) dataType;
+                final DataType elementType = arrayDataType.getElementType();
+
+                final String elementName;
+                final String wrapperName;
+                if (arrayWrapping.equals(ArrayWrapping.USE_PROPERTY_FOR_ELEMENTS)) {
+                    elementName = arrayTagName;
+                    wrapperName = fieldName;
+                } else if (arrayWrapping.equals(ArrayWrapping.USE_PROPERTY_AS_WRAPPER)) {
+                    elementName = fieldName;
+                    wrapperName = arrayTagName;
+                } else {
+                    elementName = fieldName;
+                    wrapperName = null;
+                }
+
+                if (wrapperName!= null) {
+                    tagsToOpen.add(wrapperName);
+                }
+
+                boolean loopHasWritten = false;
+                for (Object element : arrayValues) {
+
+                    final DataType chosenDataType = elementType.getFieldType() == RecordFieldType.CHOICE ? DataTypeUtils.chooseDataType(element, (ChoiceDataType) elementType) : elementType;
+                    final Object coercedElement = DataTypeUtils.convertType(element, chosenDataType, LAZY_DATE_FORMAT, LAZY_TIME_FORMAT, LAZY_TIMESTAMP_FORMAT, elementName);
+
+                    if (coercedElement != null) {
+                        boolean hasWritten = writeFieldForType(tagsToOpen, coercedElement, elementType, elementName);
+
+                        if (hasWritten) {
+                            loopHasWritten = true;
+                        }
+
+                    } else {
+                        if (nullSuppression.equals(NullSuppression.NEVER_SUPPRESS) || nullSuppression.equals(NullSuppression.SUPPRESS_MISSING)) {
+                            writeAllTags(tagsToOpen, fieldName);
+                            writer.writeEndElement();
+                            loopHasWritten = true;
+                        }
+                    }
+                }
+
+                if (wrapperName!= null) {
+                    if (loopHasWritten) {
+                        writer.writeEndElement();
+                        return true;
+                    } else {
+                        if (nullSuppression.equals(NullSuppression.NEVER_SUPPRESS) || nullSuppression.equals(NullSuppression.SUPPRESS_MISSING)) {
+                            writeAllTags(tagsToOpen);
+                            writer.writeEndElement();
+                            return true;
+                        } else {
+                            tagsToOpen.remove(tagsToOpen.size() - 1);
+                            return false;
+                        }
+                    }
+                } else {
+                    return loopHasWritten;
+                }
             }
-         */
-        return false;
+            case MAP: {
+                final MapDataType mapDataType = (MapDataType) dataType;
+                final DataType valueDataType = mapDataType.getValueType();
+                final Map<String,?> map = (Map<String,?>) coercedValue;
+
+                tagsToOpen.add(fieldName);
+                boolean loopHasWritten = false;
+
+                for (Map.Entry<String,?> entry : map.entrySet()) {
+
+                    final String key = entry.getKey();
+
+                    final DataType chosenDataType = valueDataType.getFieldType() == RecordFieldType.CHOICE ? DataTypeUtils.chooseDataType(entry.getValue(), (ChoiceDataType) valueDataType) : valueDataType;
+                    final Object coercedElement = DataTypeUtils.convertType(entry.getValue(), chosenDataType, LAZY_DATE_FORMAT, LAZY_TIME_FORMAT, LAZY_TIMESTAMP_FORMAT, key);
+
+                    if (coercedElement != null) {
+                        boolean hasWritten = writeFieldForType(tagsToOpen, entry.getValue(), valueDataType, key);
+
+                        if (hasWritten) {
+                            loopHasWritten = true;
+                        }
+                    } else {
+                        if (nullSuppression.equals(NullSuppression.NEVER_SUPPRESS) || nullSuppression.equals(NullSuppression.SUPPRESS_MISSING)) {
+                            writeAllTags(tagsToOpen, key);
+                            writer.writeEndElement();
+                            loopHasWritten = true;
+                        }
+                    }
+                }
+
+                if (loopHasWritten) {
+                    writer.writeEndElement();
+                    return true;
+                } else {
+                    if (nullSuppression.equals(NullSuppression.NEVER_SUPPRESS) || nullSuppression.equals(NullSuppression.SUPPRESS_MISSING)) {
+                        writeAllTags(tagsToOpen);
+                        writer.writeEndElement();
+                        return true;
+                    } else {
+                        tagsToOpen.remove(tagsToOpen.size() - 1);
+                        return false;
+                    }
+                }
+            }
+            case CHOICE:
+            default: {
+                return writeUnknownField(tagsToOpen, coercedValue, fieldName);
+            }
+        }
+    }
+
+    private void writeAllTags(List<String> tagsToOpen, String fieldName) throws XMLStreamException {
+        tagsToOpen.add(fieldName);
+        writeAllTags(tagsToOpen);
     }
 
     private void writeAllTags(List<String> tagsToOpen) throws XMLStreamException {
@@ -292,14 +395,186 @@ public class WriteXMLResult extends AbstractRecordSetWriter implements RecordSet
 
     @Override
     public WriteResult writeRawRecord(Record record) throws IOException {
-        // coerce == false
+        if (!isActiveRecordSet()) {
+            schemaAccess.writeHeader(recordSchema, getOutputStream());
+        }
 
-        return null;
+        List<String> tagsToOpen = new ArrayList<>();
+
+        try {
+            tagsToOpen.add(recordName);
+
+            boolean closingTagRequired = iterateThroughRecordWithoutSchema(tagsToOpen, record);
+            if (closingTagRequired) {
+                writer.writeEndElement();
+            }
+
+        } catch (XMLStreamException e) {
+            throw new IOException(e.getMessage());
+        }
+
+        final Map<String, String> attributes = schemaAccess.getAttributes(recordSchema);
+        return WriteResult.of(incrementRecordCount(), attributes);
     }
+
+    private boolean iterateThroughRecordWithoutSchema(List<String> tagsToOpen, Record record) throws XMLStreamException {
+
+        boolean loopHasWritten = false;
+
+        for (String fieldName : record.getRawFieldNames()) {
+            Object value = record.getValue(fieldName);
+
+            if (value != null) {
+                boolean hasWritten = writeUnknownField(tagsToOpen, value, fieldName);
+
+                if (hasWritten) {
+                    loopHasWritten = true;
+                }
+            } else {
+                if (nullSuppression.equals(NullSuppression.NEVER_SUPPRESS) || nullSuppression.equals(NullSuppression.SUPPRESS_MISSING)) {
+                    writeAllTags(tagsToOpen, fieldName);
+                    writer.writeEndElement();
+                    loopHasWritten = true;
+                }
+            }
+        }
+
+        return loopHasWritten;
+    }
+
+    private boolean writeUnknownField(List<String> tagsToOpen, Object value, String fieldName) throws XMLStreamException {
+
+        if (value instanceof Record) {
+            Record valueAsRecord = (Record) value;
+            tagsToOpen.add(fieldName);
+
+            boolean hasWritten = iterateThroughRecordWithoutSchema(tagsToOpen, valueAsRecord);
+
+            if (hasWritten) {
+                writer.writeEndElement();
+                return true;
+            } else {
+                if (nullSuppression.equals(NullSuppression.NEVER_SUPPRESS) || nullSuppression.equals(NullSuppression.SUPPRESS_MISSING)) {
+                    writeAllTags(tagsToOpen);
+                    writer.writeEndElement();
+                    return true;
+                } else {
+                    tagsToOpen.remove(tagsToOpen.size() - 1);
+                    return false;
+                }
+            }
+        }
+
+        if (value instanceof Object[]) {
+            Object[] valueAsArray = (Object[]) value;
+
+            final String elementName;
+            final String wrapperName;
+            if (arrayWrapping.equals(ArrayWrapping.USE_PROPERTY_FOR_ELEMENTS)) {
+                elementName = arrayTagName;
+                wrapperName = fieldName;
+            } else if (arrayWrapping.equals(ArrayWrapping.USE_PROPERTY_AS_WRAPPER)) {
+                elementName = fieldName;
+                wrapperName = arrayTagName;
+            } else {
+                elementName = fieldName;
+                wrapperName = null;
+            }
+
+            if (wrapperName!= null) {
+                tagsToOpen.add(wrapperName);
+            }
+
+            boolean loopHasWritten = false;
+
+            for (Object element : valueAsArray) {
+                if (element != null) {
+                    boolean hasWritten = writeUnknownField(tagsToOpen, element, elementName);
+
+                    if (hasWritten) {
+                        loopHasWritten = true;
+                    }
+
+                } else {
+                    if (nullSuppression.equals(NullSuppression.NEVER_SUPPRESS) || nullSuppression.equals(NullSuppression.SUPPRESS_MISSING)) {
+                        writeAllTags(tagsToOpen, fieldName);
+                        writer.writeEndElement();
+                        loopHasWritten = true;
+                    }
+                }
+            }
+
+            if (wrapperName!= null) {
+                if (loopHasWritten) {
+                    writer.writeEndElement();
+                    return true;
+                } else {
+                    if (nullSuppression.equals(NullSuppression.NEVER_SUPPRESS) || nullSuppression.equals(NullSuppression.SUPPRESS_MISSING)) {
+                        writeAllTags(tagsToOpen);
+                        writer.writeEndElement();
+                        return true;
+                    } else {
+                        tagsToOpen.remove(tagsToOpen.size() - 1);
+                        return false;
+                    }
+                }
+            } else {
+                return loopHasWritten;
+            }
+        }
+
+        if (value instanceof Map) {
+            Map<String, ?> valueAsMap = (Map<String, ?>) value;
+
+            tagsToOpen.add(fieldName);
+            boolean loopHasWritten = false;
+
+            for (Map.Entry<String,?> entry : valueAsMap.entrySet()) {
+
+                final String key = entry.getKey();
+                final Object entryValue = entry.getValue();
+
+                if (entryValue != null) {
+                    boolean hasWritten = writeUnknownField(tagsToOpen, entry.getValue(), key);
+
+                    if (hasWritten) {
+                        loopHasWritten = true;
+                    }
+                } else {
+                    if (nullSuppression.equals(NullSuppression.NEVER_SUPPRESS) || nullSuppression.equals(NullSuppression.SUPPRESS_MISSING)) {
+                        writeAllTags(tagsToOpen, key);
+                        writer.writeEndElement();
+                        loopHasWritten = true;
+                    }
+                }
+
+            }
+
+            if (loopHasWritten) {
+                writer.writeEndElement();
+                return true;
+            } else {
+                if (nullSuppression.equals(NullSuppression.NEVER_SUPPRESS) || nullSuppression.equals(NullSuppression.SUPPRESS_MISSING)) {
+                    writeAllTags(tagsToOpen);
+                    writer.writeEndElement();
+                    return true;
+                } else {
+                    tagsToOpen.remove(tagsToOpen.size() - 1);
+                    return false;
+                }
+            }
+        }
+
+        writeAllTags(tagsToOpen, fieldName);
+        writer.writeCharacters(value.toString());
+        writer.writeEndElement();
+        return true;
+    }
+
 
     @Override
     public String getMimeType() {
-        return null;
+        return "application/xml";
     }
 
     private boolean recordHasField(RecordField field, Record record) {

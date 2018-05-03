@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-package org.apache.nifi.xml;
+package org.apache.nifi;
 
 public enum NullSuppression {
     ALWAYS_SUPPRESS,
