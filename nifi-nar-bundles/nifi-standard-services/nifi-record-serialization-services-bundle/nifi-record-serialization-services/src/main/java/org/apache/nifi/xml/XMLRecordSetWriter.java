@@ -1,3 +1,20 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.nifi.xml;
 
 import org.apache.nifi.NullSuppression;
@@ -10,6 +27,7 @@ import org.apache.nifi.components.ValidationContext;
 import org.apache.nifi.components.ValidationResult;
 import org.apache.nifi.expression.ExpressionLanguageScope;
 import org.apache.nifi.logging.ComponentLog;
+import org.apache.nifi.processor.util.StandardValidators;
 import org.apache.nifi.schema.access.SchemaNotFoundException;
 import org.apache.nifi.serialization.DateTimeTextRecordSetWriter;
 import org.apache.nifi.serialization.RecordSetWriter;
@@ -62,12 +80,31 @@ public class XMLRecordSetWriter extends DateTimeTextRecordSetWriter implements R
             .required(true)
             .build();
 
+    /*
+    EL currently is not considered for RecordSetWriters, right?
+     */
     public static final PropertyDescriptor ROOT_TAG_NAME = new PropertyDescriptor.Builder()
             .name("root_tag_name")
             .displayName("Name of Root Tag")
             .description("Specifies the name of the XML root tag wrapping the record set")
+            .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
             .expressionLanguageSupported(ExpressionLanguageScope.NONE)
             .defaultValue("root")
+            .required(true)
+            .build();
+
+    /*
+    Initially, I planned to use the record name of the schema for this using
+    recordSchema.getIdentifier().getName().get(),
+    but for my test cases (add schema as text / attribute) this was null.
+     */
+    public static final PropertyDescriptor RECORD_TAG_NAME = new PropertyDescriptor.Builder()
+            .name("record_tag_name")
+            .displayName("Name of Record Tag")
+            .description("Specifies the name of the XML record tag wrapping the record fields")
+            .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
+            .expressionLanguageSupported(ExpressionLanguageScope.NONE)
+            .defaultValue("record")
             .required(true)
             .build();
 
@@ -84,6 +121,7 @@ public class XMLRecordSetWriter extends DateTimeTextRecordSetWriter implements R
             .name("array_tag_name")
             .displayName("Array Tag Name")
             .description("Name of the tag used by property \"Wrap Elements of Arrays\" to write arrays")
+            .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
             .expressionLanguageSupported(ExpressionLanguageScope.NONE)
             .required(false)
             .build();
@@ -94,6 +132,7 @@ public class XMLRecordSetWriter extends DateTimeTextRecordSetWriter implements R
         properties.add(SUPPRESS_NULLS);
         properties.add(PRETTY_PRINT_XML);
         properties.add(ROOT_TAG_NAME);
+        properties.add(RECORD_TAG_NAME);
         properties.add(ARRAY_WRAPPING);
         properties.add(ARRAY_TAG_NAME);
         return properties;
@@ -101,18 +140,18 @@ public class XMLRecordSetWriter extends DateTimeTextRecordSetWriter implements R
 
     @Override
     protected Collection<ValidationResult> customValidate(final ValidationContext validationContext) {
-        if (!getConfigurationContext().getProperty(ARRAY_WRAPPING).equals(NO_WRAPPING)) {
-            if (!getConfigurationContext().getProperty(ARRAY_TAG_NAME).isSet()) {
+        if (!validationContext.getProperty(ARRAY_WRAPPING).getValue().equals(NO_WRAPPING.getValue())) {
+            if (!validationContext.getProperty(ARRAY_TAG_NAME).isSet()) {
                 StringBuilder explanation = new StringBuilder()
-                        .append("If property ")
+                        .append("if property \'")
                         .append(ARRAY_WRAPPING.getName())
-                        .append(" is defined as ")
+                        .append("\' is defined as \'")
                         .append(USE_PROPERTY_AS_WRAPPER.getDisplayName())
-                        .append(" or ")
+                        .append("\' or \'")
                         .append(USE_PROPERTY_FOR_ELEMENTS.getDisplayName())
-                        .append(" property ")
+                        .append("\' the property \'")
                         .append(ARRAY_TAG_NAME.getDisplayName())
-                        .append(" has to be set.");
+                        .append("\' has to be set.");
 
                 return Collections.singleton(new ValidationResult.Builder()
                         .subject(ARRAY_TAG_NAME.getName())
@@ -127,25 +166,26 @@ public class XMLRecordSetWriter extends DateTimeTextRecordSetWriter implements R
     @Override
     public RecordSetWriter createWriter(final ComponentLog logger, final RecordSchema schema, final OutputStream out) throws SchemaNotFoundException, IOException {
 
-        final PropertyValue nullSuppression = getConfigurationContext().getProperty(SUPPRESS_NULLS);
+        final String nullSuppression = getConfigurationContext().getProperty(SUPPRESS_NULLS).getValue();
         final NullSuppression nullSuppressionEnum;
-        if (nullSuppression.equals(ALWAYS_SUPPRESS)) {
+        if (nullSuppression.equals(ALWAYS_SUPPRESS.getValue())) {
             nullSuppressionEnum = NullSuppression.ALWAYS_SUPPRESS;
-        } else if (nullSuppression.equals(NEVER_SUPPRESS)) {
+        } else if (nullSuppression.equals(NEVER_SUPPRESS.getValue())) {
             nullSuppressionEnum = NullSuppression.NEVER_SUPPRESS;
         } else {
             nullSuppressionEnum = NullSuppression.SUPPRESS_MISSING;
         }
 
-        final boolean prettyPrint = getConfigurationContext().getProperty(PRETTY_PRINT_XML).equals("true");
+        final boolean prettyPrint = getConfigurationContext().getProperty(PRETTY_PRINT_XML).getValue().equals("true");
 
         final String rootTagName = getConfigurationContext().getProperty(ROOT_TAG_NAME).getValue();
+        final String recordTagName = getConfigurationContext().getProperty(RECORD_TAG_NAME).getValue();
 
-        final PropertyValue arrayWrapping = getConfigurationContext().getProperty(ARRAY_WRAPPING);
+        final String arrayWrapping = getConfigurationContext().getProperty(ARRAY_WRAPPING).getValue();
         final ArrayWrapping arrayWrappingEnum;
-        if (arrayWrapping.equals(NO_WRAPPING)) {
+        if (arrayWrapping.equals(NO_WRAPPING.getValue())) {
             arrayWrappingEnum = ArrayWrapping.NO_WRAPPING;
-        } else if (arrayWrapping.equals(USE_PROPERTY_AS_WRAPPER)) {
+        } else if (arrayWrapping.equals(USE_PROPERTY_AS_WRAPPER.getValue())) {
             arrayWrappingEnum = ArrayWrapping.USE_PROPERTY_AS_WRAPPER;
         } else {
             arrayWrappingEnum = ArrayWrapping.USE_PROPERTY_FOR_ELEMENTS;
@@ -159,7 +199,7 @@ public class XMLRecordSetWriter extends DateTimeTextRecordSetWriter implements R
         }
 
         return new WriteXMLResult(logger, schema, getSchemaAccessWriter(schema),
-                out, prettyPrint, nullSuppressionEnum, arrayWrappingEnum, arrayTagName, rootTagName,
+                out, prettyPrint, nullSuppressionEnum, arrayWrappingEnum, arrayTagName, rootTagName, recordTagName,
                 getDateFormat().orElse(null), getTimeFormat().orElse(null), getTimestampFormat().orElse(null));
     }
 }

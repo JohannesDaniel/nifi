@@ -1,6 +1,23 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.nifi.xml;
 
-import com.sun.xml.internal.txw2.output.IndentingXMLStreamWriter;
+import javanet.staxutils.IndentingXMLStreamWriter;
 import org.apache.nifi.NullSuppression;
 import org.apache.nifi.logging.ComponentLog;
 import org.apache.nifi.schema.access.SchemaAccessWriter;
@@ -42,7 +59,7 @@ public class WriteXMLResult extends AbstractRecordSetWriter implements RecordSet
     final NullSuppression nullSuppression;
     final ArrayWrapping arrayWrapping;
     final String arrayTagName;
-    final String recordName;
+    final String recordTagName;
     final String rootTagName;
 
     private final Supplier<DateFormat> LAZY_DATE_FORMAT;
@@ -50,7 +67,7 @@ public class WriteXMLResult extends AbstractRecordSetWriter implements RecordSet
     private final Supplier<DateFormat> LAZY_TIMESTAMP_FORMAT;
 
     public WriteXMLResult(final ComponentLog logger, final RecordSchema recordSchema, final SchemaAccessWriter schemaAccess, final OutputStream out, final boolean prettyPrint,
-                          final NullSuppression nullSuppression, final ArrayWrapping arrayWrapping, final String arrayTagName, final String rootTagName,
+                          final NullSuppression nullSuppression, final ArrayWrapping arrayWrapping, final String arrayTagName, final String rootTagName, final String recordTagName,
                           final String dateFormat, final String timeFormat, final String timestampFormat) throws IOException {
 
         super(out);
@@ -64,13 +81,7 @@ public class WriteXMLResult extends AbstractRecordSetWriter implements RecordSet
         this.arrayTagName = arrayTagName;
 
         this.rootTagName = rootTagName;
-
-        final Optional<String> recordNameOptional = recordSchema.getIdentifier().getName();
-        if (recordNameOptional.isPresent()) {
-            recordName = recordNameOptional.get();
-        } else {
-            throw new IOException("Could not retrieve name for record in schema");
-        }
+        this.recordTagName = recordTagName;
 
         final DateFormat df = dateFormat == null ? null : DataTypeUtils.getDateFormat(dateFormat);
         final DateFormat tf = timeFormat == null ? null : DataTypeUtils.getDateFormat(timeFormat);
@@ -154,12 +165,11 @@ public class WriteXMLResult extends AbstractRecordSetWriter implements RecordSet
         if (!isActiveRecordSet()) {
             schemaAccess.writeHeader(recordSchema, getOutputStream());
         }
-        System.out.println(record);
 
         List<String> tagsToOpen = new ArrayList<>();
 
         try {
-            tagsToOpen.add(recordName);
+            tagsToOpen.add(recordTagName);
 
             boolean closingTagRequired = iterateThroughRecordUsingSchema(tagsToOpen, record, recordSchema);
             if (closingTagRequired) {
@@ -342,7 +352,8 @@ public class WriteXMLResult extends AbstractRecordSetWriter implements RecordSet
 
                     final String key = entry.getKey();
 
-                    final DataType chosenDataType = valueDataType.getFieldType() == RecordFieldType.CHOICE ? DataTypeUtils.chooseDataType(entry.getValue(), (ChoiceDataType) valueDataType) : valueDataType;
+                    final DataType chosenDataType = valueDataType.getFieldType() == RecordFieldType.CHOICE ? DataTypeUtils.chooseDataType(entry.getValue(),
+                            (ChoiceDataType) valueDataType) : valueDataType;
                     final Object coercedElement = DataTypeUtils.convertType(entry.getValue(), chosenDataType, LAZY_DATE_FORMAT, LAZY_TIME_FORMAT, LAZY_TIMESTAMP_FORMAT, key);
 
                     if (coercedElement != null) {
@@ -402,7 +413,7 @@ public class WriteXMLResult extends AbstractRecordSetWriter implements RecordSet
         List<String> tagsToOpen = new ArrayList<>();
 
         try {
-            tagsToOpen.add(recordName);
+            tagsToOpen.add(recordTagName);
 
             boolean closingTagRequired = iterateThroughRecordWithoutSchema(tagsToOpen, record);
             if (closingTagRequired) {
