@@ -153,6 +153,7 @@
                         <exclude>src/test/resources/xml/person.xml</exclude>
                         <exclude>src/test/resources/xml/testschema</exclude>
                         <exclude>src/test/resources/xml/testschema2</exclude>
+                        <exclude>src/test/resources/xml/testschema3</exclude>
                     </excludes>
                 </configuration>
             </plugin>

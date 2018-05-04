@@ -45,7 +45,6 @@ import java.text.DateFormat;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.function.Supplier;
 
@@ -94,8 +93,6 @@ public class WriteXMLResult extends AbstractRecordSetWriter implements RecordSet
         try {
             XMLOutputFactory factory = XMLOutputFactory.newInstance();
 
-            // should I consider the encoding somehow (e. g. via property)?
-            // e. g. writer = factory.createXMLStreamWriter(out, StandardCharsets.UTF_8.name());
             if (prettyPrint) {
                 writer = new IndentingXMLStreamWriter(factory.createXMLStreamWriter(out));
             } else {

@@ -22,7 +22,6 @@ import org.apache.nifi.annotation.documentation.CapabilityDescription;
 import org.apache.nifi.annotation.documentation.Tags;
 import org.apache.nifi.components.AllowableValue;
 import org.apache.nifi.components.PropertyDescriptor;
-import org.apache.nifi.components.PropertyValue;
 import org.apache.nifi.components.ValidationContext;
 import org.apache.nifi.components.ValidationResult;
 import org.apache.nifi.expression.ExpressionLanguageScope;
@@ -80,9 +79,6 @@ public class XMLRecordSetWriter extends DateTimeTextRecordSetWriter implements R
             .required(true)
             .build();
 
-    /*
-    EL currently is not considered for RecordSetWriters, right?
-     */
     public static final PropertyDescriptor ROOT_TAG_NAME = new PropertyDescriptor.Builder()
             .name("root_tag_name")
             .displayName("Name of Root Tag")
@@ -93,11 +89,6 @@ public class XMLRecordSetWriter extends DateTimeTextRecordSetWriter implements R
             .required(true)
             .build();
 
-    /*
-    Initially, I planned to use the record name of the schema for this using
-    recordSchema.getIdentifier().getName().get(),
-    but for my test cases (add schema as text / attribute) this was null.
-     */
     public static final PropertyDescriptor RECORD_TAG_NAME = new PropertyDescriptor.Builder()
             .name("record_tag_name")
             .displayName("Name of Record Tag")

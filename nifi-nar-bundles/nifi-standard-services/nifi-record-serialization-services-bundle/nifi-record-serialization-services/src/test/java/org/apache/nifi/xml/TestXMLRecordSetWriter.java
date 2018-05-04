@@ -1,3 +1,20 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.nifi.xml;
 
 import org.apache.nifi.components.AllowableValue;
@@ -51,7 +68,7 @@ public class TestXMLRecordSetWriter {
                 "<name1>val1</name1><name2></name2></record>" +
                 "<record><array_field>1</array_field><array_field></array_field><array_field>3</array_field>" +
                 "<name1>val1</name1><name2></name2></record></root>";
-        String actual = new String (runner.getContentAsByteArray(runner.getFlowFilesForRelationship(TestXMLRecordSetWriterProcessor.SUCCESS).get(0)));
+        String actual = new String(runner.getContentAsByteArray(runner.getFlowFilesForRelationship(TestXMLRecordSetWriterProcessor.SUCCESS).get(0)));
         assertThat(expected, CompareMatcher.isSimilarTo(actual).ignoreWhitespace().withNodeMatcher(new DefaultNodeMatcher(ElementSelectors.byNameAndText)));
     }
 
@@ -73,7 +90,7 @@ public class TestXMLRecordSetWriter {
                 "<name1>val1</name1><name2></name2></RECORD_NODE>" +
                 "<RECORD_NODE><array_field>1</array_field><array_field></array_field><array_field>3</array_field>" +
                 "<name1>val1</name1><name2></name2></RECORD_NODE></ROOT_NODE>";
-        String actual = new String (runner.getContentAsByteArray(runner.getFlowFilesForRelationship(TestXMLRecordSetWriterProcessor.SUCCESS).get(0)));
+        String actual = new String(runner.getContentAsByteArray(runner.getFlowFilesForRelationship(TestXMLRecordSetWriterProcessor.SUCCESS).get(0)));
         assertThat(expected, CompareMatcher.isSimilarTo(actual).ignoreWhitespace().withNodeMatcher(new DefaultNodeMatcher(ElementSelectors.byNameAndText)));
     }
 
@@ -94,7 +111,7 @@ public class TestXMLRecordSetWriter {
                 "<name1>val1</name1></record>" +
                 "<record><array_field>1</array_field><array_field>3</array_field>" +
                 "<name1>val1</name1></record></root>";
-        String actual = new String (runner.getContentAsByteArray(runner.getFlowFilesForRelationship(TestXMLRecordSetWriterProcessor.SUCCESS).get(0)));
+        String actual = new String(runner.getContentAsByteArray(runner.getFlowFilesForRelationship(TestXMLRecordSetWriterProcessor.SUCCESS).get(0)));
         assertThat(expected, CompareMatcher.isSimilarTo(actual).ignoreWhitespace().withNodeMatcher(new DefaultNodeMatcher(ElementSelectors.byNameAndText)));
     }
 
@@ -116,7 +133,7 @@ public class TestXMLRecordSetWriter {
                 "<name1>val1</name1><name2></name2></record>" +
                 "<record><wrap><array_field>1</array_field><array_field></array_field><array_field>3</array_field></wrap>" +
                 "<name1>val1</name1><name2></name2></record></root>";
-        String actual = new String (runner.getContentAsByteArray(runner.getFlowFilesForRelationship(TestXMLRecordSetWriterProcessor.SUCCESS).get(0)));
+        String actual = new String(runner.getContentAsByteArray(runner.getFlowFilesForRelationship(TestXMLRecordSetWriterProcessor.SUCCESS).get(0)));
         assertThat(expected, CompareMatcher.isSimilarTo(actual).ignoreWhitespace().withNodeMatcher(new DefaultNodeMatcher(ElementSelectors.byNameAndText)));
     }
 

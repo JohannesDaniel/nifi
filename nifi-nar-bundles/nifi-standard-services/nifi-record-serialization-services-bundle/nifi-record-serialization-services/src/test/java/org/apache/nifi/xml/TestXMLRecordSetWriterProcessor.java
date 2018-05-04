@@ -1,3 +1,20 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.nifi.xml;
 
 import org.apache.nifi.components.PropertyDescriptor;
@@ -7,20 +24,15 @@ import org.apache.nifi.processor.ProcessContext;
 import org.apache.nifi.processor.ProcessSession;
 import org.apache.nifi.processor.Relationship;
 import org.apache.nifi.processor.exception.ProcessException;
-import org.apache.nifi.processor.io.OutputStreamCallback;
 import org.apache.nifi.serialization.RecordSetWriter;
 import org.apache.nifi.serialization.RecordSetWriterFactory;
 import org.apache.nifi.serialization.SimpleRecordSchema;
-import org.apache.nifi.serialization.record.DataType;
 import org.apache.nifi.serialization.record.ListRecordSet;
 import org.apache.nifi.serialization.record.MapRecord;
 import org.apache.nifi.serialization.record.Record;
-import org.apache.nifi.serialization.record.RecordFieldType;
 import org.apache.nifi.serialization.record.RecordSchema;
 import org.apache.nifi.serialization.record.RecordSet;
 
-import java.io.IOException;
-import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -45,27 +57,24 @@ public class TestXMLRecordSetWriterProcessor extends AbstractProcessor {
         FlowFile flowFile = session.get();
 
         final RecordSetWriterFactory writerFactory = context.getProperty(XML_WRITER).asControllerService(RecordSetWriterFactory.class);
-        flowFile = session.write(flowFile, new OutputStreamCallback() {
-            @Override
-            public void process(final OutputStream out) throws IOException {
-                try {
+        flowFile = session.write(flowFile, out -> {
+            try {
 
-                    final RecordSchema schema = writerFactory.getSchema(null, null);
+                final RecordSchema schema = writerFactory.getSchema(null, null);
 
-                    RecordSet recordSet = getRecordSet();
+                RecordSet recordSet = getRecordSet();
 
-                    final RecordSetWriter writer = writerFactory.createWriter(getLogger(), schema, out);
+                final RecordSetWriter writer = writerFactory.createWriter(getLogger(), schema, out);
 
 
-                    writer.write(recordSet);
-                    writer.flush();
+                writer.write(recordSet);
+                writer.flush();
 
 
-                } catch (Exception e) {
-                    e.printStackTrace();
-                }
-
+            } catch (Exception e) {
+                e.printStackTrace();
             }
+
         });
         session.transfer(flowFile, SUCCESS);
     }
