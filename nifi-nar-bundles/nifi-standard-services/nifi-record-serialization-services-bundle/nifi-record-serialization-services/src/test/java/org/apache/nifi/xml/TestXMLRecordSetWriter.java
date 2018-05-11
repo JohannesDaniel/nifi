@@ -58,6 +58,9 @@ public class TestXMLRecordSetWriter {
         XMLRecordSetWriter writer = new XMLRecordSetWriter();
         TestRunner runner = setup(writer);
 
+        runner.setProperty(writer, XMLRecordSetWriter.ROOT_TAG_NAME, "root");
+        runner.setProperty(writer, XMLRecordSetWriter.RECORD_TAG_NAME, "record");
+
         runner.enableControllerService(writer);
         runner.enqueue("");
         runner.run();
@@ -99,6 +102,9 @@ public class TestXMLRecordSetWriter {
         XMLRecordSetWriter writer = new XMLRecordSetWriter();
         TestRunner runner = setup(writer);
 
+        runner.setProperty(writer, XMLRecordSetWriter.ROOT_TAG_NAME, "root");
+        runner.setProperty(writer, XMLRecordSetWriter.RECORD_TAG_NAME, "record");
+
         runner.setProperty(writer, XMLRecordSetWriter.SUPPRESS_NULLS, XMLRecordSetWriter.ALWAYS_SUPPRESS);
 
         runner.enableControllerService(writer);
@@ -119,6 +125,9 @@ public class TestXMLRecordSetWriter {
     public void testArrayWrapping() throws IOException, InitializationException {
         XMLRecordSetWriter writer = new XMLRecordSetWriter();
         TestRunner runner = setup(writer);
+
+        runner.setProperty(writer, XMLRecordSetWriter.ROOT_TAG_NAME, "root");
+        runner.setProperty(writer, XMLRecordSetWriter.RECORD_TAG_NAME, "record");
 
         runner.setProperty(writer, XMLRecordSetWriter.ARRAY_WRAPPING, XMLRecordSetWriter.USE_PROPERTY_AS_WRAPPER);
         runner.setProperty(writer, XMLRecordSetWriter.ARRAY_TAG_NAME, "wrap");
@@ -141,6 +150,9 @@ public class TestXMLRecordSetWriter {
     public void testValidation() throws IOException, InitializationException {
         XMLRecordSetWriter writer = new XMLRecordSetWriter();
         TestRunner runner = setup(writer);
+
+        runner.setProperty(writer, XMLRecordSetWriter.ROOT_TAG_NAME, "root");
+        runner.setProperty(writer, XMLRecordSetWriter.RECORD_TAG_NAME, "record");
 
         runner.setProperty(writer, XMLRecordSetWriter.ARRAY_WRAPPING, XMLRecordSetWriter.USE_PROPERTY_AS_WRAPPER);
 
