@@ -13,22 +13,33 @@
   See the License for the specific language governing permissions and
   limitations under the License.
 -->
-<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
+
     <parent>
         <groupId>org.apache.nifi</groupId>
-        <artifactId>nifi-nar-bundles</artifactId>
+        <artifactId>nifi-solr-bundle</artifactId>
         <version>1.7.0-SNAPSHOT</version>
     </parent>
-    <artifactId>nifi-solr-bundle</artifactId>
-    <packaging>pom</packaging>
-    <description>A bundle of processors that can store and retrieve data from Apache Solr</description>
-    <modules>
-        <module>nifi-solr-processors</module>
-        <module>nifi-solr-nar</module>
-        <module>nifi-solr-client-service</module>
-        <module>nifi-solr-client-service-api</module>
-        <module>nifi-solr-client-service-api-nar</module>
-        <module>nifi-solr-client-service-nar</module>
-    </modules>
+
+    <artifactId>nifi-solr-client-service</artifactId>
+    <packaging>jar</packaging>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.apache.nifi</groupId>
+            <artifactId>nifi-api</artifactId>
+            <scope>provided</scope>
+            <version>1.7.0-SNAPSHOT</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.nifi</groupId>
+            <artifactId>nifi-solr-client-service-api</artifactId>
+            <version>1.7.0-SNAPSHOT</version>
+            <scope>provided</scope>
+        </dependency>
+    </dependencies>
+
 </project>
