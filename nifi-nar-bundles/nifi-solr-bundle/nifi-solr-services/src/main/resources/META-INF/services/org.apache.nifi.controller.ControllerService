@@ -12,8 +12,4 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-org.apache.nifi.processors.solr.PutSolrContentStream
-org.apache.nifi.processors.solr.PutSolrRecord
-org.apache.nifi.processors.solr.GetSolr
-org.apache.nifi.processors.solr.QuerySolr
-org.apache.nifi.processors.solr.SolrClientTestProcessor
+org.apache.nifi.solr.SolrJClient
