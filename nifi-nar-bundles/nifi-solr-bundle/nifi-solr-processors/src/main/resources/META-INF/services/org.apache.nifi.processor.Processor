@@ -16,3 +16,4 @@ org.apache.nifi.processors.solr.PutSolrContentStream
 org.apache.nifi.processors.solr.PutSolrRecord
 org.apache.nifi.processors.solr.GetSolr
 org.apache.nifi.processors.solr.QuerySolr
+org.apache.nifi.processors.solr.SolrClientTestProcessor
