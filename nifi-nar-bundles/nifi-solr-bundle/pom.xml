@@ -32,6 +32,7 @@
         <module>nifi-solr-client-service-api</module>
         <module>nifi-solr-client-service-api-nar</module>
         <module>nifi-solr-client-service-nar</module>
+        <module>nifi-solr-services</module>
     </modules>
 
     <dependencyManagement>
