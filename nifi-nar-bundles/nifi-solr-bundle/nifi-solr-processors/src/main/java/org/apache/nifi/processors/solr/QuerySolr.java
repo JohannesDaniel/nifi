@@ -221,7 +221,7 @@ public class QuerySolr extends SolrProcessor {
     public static final Relationship RESULTS = new Relationship.Builder().name("results")
             .description("Results of Solr queries").build();
     public static final Relationship FACETS = new Relationship.Builder().name("facets")
-            .description("Results of faceted search").build();
+            .description("Results of faceted getSolrClient").build();
     public static final Relationship STATS = new Relationship.Builder().name("stats")
             .description("Stats about Solr index").build();
     public static final Relationship ORIGINAL = new Relationship.Builder().name("original")

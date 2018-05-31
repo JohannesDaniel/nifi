@@ -66,7 +66,7 @@ public class SolrClientTestProcessor extends AbstractProcessor {
         Map<String,String> map = new HashMap<>();
         try {
             map.put("transituri", solrClientService.getTransitUrl("", ""));
-            map.put("search",  solrClientService.search("", "", ""));
+            map.put("getSolrClient",  solrClientService.getSolrClient("", "", ""));
         } catch (IOException e) {
             e.printStackTrace();
         }

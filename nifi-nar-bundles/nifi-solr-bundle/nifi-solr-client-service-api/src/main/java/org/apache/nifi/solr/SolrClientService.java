@@ -5,8 +5,10 @@ import org.apache.nifi.components.PropertyDescriptor;
 import org.apache.nifi.controller.ControllerService;
 import org.apache.nifi.expression.AttributeExpression;
 import org.apache.nifi.expression.ExpressionLanguageScope;
+import org.apache.nifi.kerberos.KerberosCredentialsService;
 import org.apache.nifi.processor.util.StandardValidators;
 import org.apache.nifi.ssl.SSLContextService;
+import org.apache.solr.client.solrj.SolrClient;
 
 import java.io.IOException;
 import java.util.concurrent.TimeUnit;
@@ -34,7 +36,7 @@ public interface SolrClientService extends ControllerService {
             .description("The Solr collection name, only used with a Solr Type of Cloud")
             .required(false)
             .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
-            .expressionLanguageSupported(ExpressionLanguageScope.FLOWFILE_ATTRIBUTES)
+            .expressionLanguageSupported(ExpressionLanguageScope.VARIABLE_REGISTRY)
             .build();
 
     PropertyDescriptor SOLR_LOCATION = new PropertyDescriptor
@@ -72,6 +74,15 @@ public interface SolrClientService extends ControllerService {
             .required(false)
             .identifiesControllerService(SSLContextService.class)
             .build();
+
+    static final PropertyDescriptor KERBEROS_CREDENTIALS_SERVICE = new PropertyDescriptor.Builder()
+            .name("kerberos-credentials-service")
+            .displayName("Kerberos Credentials Service")
+            .description("Specifies the Kerberos Credentials Controller Service that should be used for authenticating with Kerberos")
+            .identifiesControllerService(KerberosCredentialsService.class)
+            .required(false)
+            .build();
+
 
     PropertyDescriptor SOLR_SOCKET_TIMEOUT = new PropertyDescriptor
             .Builder().name("Solr Socket Timeout")
@@ -123,13 +134,10 @@ public interface SolrClientService extends ControllerService {
 
 
     /**
-     * Perform a search using the JSON DSL.
-     * @param query A JSON string reprensenting the query.
-     * @param index The index to target. Optional.
-     * @param type The type to target. Optional. Will not be used in future versions of ElasticSearch.
+     * Perform a getSolrClient using the JSON DSL.
      * @return A SearchResponse object if successful.
      */
-    String search(String query, String index, String type) throws IOException;
+    SolrClient getSolrClient() throws IOException;
 
     /**
      * Build a transit URL to use with the provenance reporter.
@@ -138,4 +146,11 @@ public interface SolrClientService extends ControllerService {
      * @return a URL describing the ElasticSearch cluster.
      */
     String getTransitUrl(String index, String type);
+
+    String getUsername();
+
+    String getPassword();
+
+    boolean isBasicAuthEnabled();
+
 }
