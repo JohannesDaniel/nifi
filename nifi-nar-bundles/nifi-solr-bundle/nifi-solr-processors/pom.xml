@@ -165,7 +165,7 @@
         </dependency>
         <dependency>
             <groupId>org.apache.nifi</groupId>
-            <artifactId>nifi-solr-client-service</artifactId>
+            <artifactId>nifi-solr-services</artifactId>
             <version>1.7.0-SNAPSHOT</version>
             <scope>test</scope>
         </dependency>

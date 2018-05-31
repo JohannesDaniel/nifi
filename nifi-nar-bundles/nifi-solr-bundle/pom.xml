@@ -28,10 +28,8 @@
     <modules>
         <module>nifi-solr-processors</module>
         <module>nifi-solr-nar</module>
-        <module>nifi-solr-client-service</module>
         <module>nifi-solr-client-service-api</module>
         <module>nifi-solr-client-service-api-nar</module>
-        <module>nifi-solr-client-service-nar</module>
         <module>nifi-solr-services</module>
         <module>nifi-solr-services-nar</module>
     </modules>
